@@ -1,31 +1,22 @@
-# pico USB CDC+HID template
+# TCS3200 Sensor Kit
 
-`PID=0x4005`
-`VID=0xACDC`
+RP2040-Zero 测量屏幕颜色：PIO 测周期，RGB+C 每毫秒一组，CDC bulk 传输；同一固件可配置 ARM 颜色，偏离后延迟发送键盘或鼠标按钮。
 
-## Prepare
+| 目录 | 内容 |
+|---|---|
+| `firmware/` | Pico SDK + TinyUSB 固件、PIO、测试与接线说明 |
+| `host/` | 上位机软件目录，本次预留，尚未实现 |
+| `docs/protocol.md` | 两端共用的 USB 二进制协议、字段单位与状态语义 |
 
-### Get docker
+基于 [Nigh/pico-cdc-hid-template](https://github.com/Nigh/pico-cdc-hid-template) 建立，保留 MIT 许可。已移除文本日志、通用 HID 回显及 LED 调度；HID 为键盘与鼠标。
 
-```shell
-docker pull xianii/pico-sdk:latest
+在仓库根目录运行：
+
+```sh
+make       # 使用 xianii/pico-sdk:2.3.0 Docker 镜像编译
+make test  # 主机 C 自检（ASan/UBSan）及 PIO 时序模拟；需要 cc 和 Python 3
 ```
 
-### build
+输出：`firmware/build/src/tcs3200_sensor.uf2`。按住 BOOT 接入 USB，复制 UF2 到引导盘。详细接线与验证见 [固件说明](firmware/README.md)，上位机开发以 [协议 v1](docs/protocol.md) 为准。
 
-```shell
-# build (docker, files owned by your user)
-make
-# remove root-owned build/ from earlier docker runs
-make docker_clean
-# or: make clean  (falls back to docker_clean if build/ is not writable)
-make format
-make rebuild
-```
-
-## Usage
-
-- Pico enumerates CDC and HID.
-- Logs go out CDC via a 1 KB ring drained in the main loop (timer IRQ never writes USB).
-- CDC `UPLOAD` + newline reboots to UF2 bootloader.
-- Any HID OUT report is logged on CDC and echoed back with each byte incremented by 1.
+软件自检与交叉编译不代替硬件验证。1000 Hz 是计划组频率，低频/超时通道置零；屏幕 PWM、刷新与各通道时间偏移可能影响颜色判定。

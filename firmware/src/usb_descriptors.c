@@ -24,17 +24,11 @@
  */
 
 #include "tusb.h"
+#include "usb_func.h"
+#include "pico/unique_id.h"
 
-/* A combination of interfaces must have a unique product id, since PC will save device driver after the first plug.
- * Same VID/PID with different interface e.g MSC (first), then CDC (later) will possibly cause system error on PC.
- *
- * Auto ProductID layout's Bitmap:
- *   [MSB]         HID | MSC | CDC          [LSB]
- */
-#define _PID_MAP(itf, n) ((CFG_TUD_##itf) << (n))
-
-// In THIS example, PID = 0x4005
-#define USB_PID (0x4000 | _PID_MAP(CDC, 0) | _PID_MAP(MSC, 1) | _PID_MAP(HID, 2) | _PID_MAP(MIDI, 3) | _PID_MAP(VENDOR, 4))
+// A distinct PID prevents reusing the template's cached generic-HID driver binding.
+#define USB_PID 0x4015
 
 #define USB_VID 0xACDC
 #define USB_BCD 0x0200
@@ -76,7 +70,8 @@ uint8_t const* tud_descriptor_device_cb(void) {
 // HID Report Descriptor
 //--------------------------------------------------------------------+
 uint8_t const desc_hid_report[] = {
-	TUD_HID_REPORT_DESC_GENERIC_INOUT(CFG_TUD_HID_EP_BUFSIZE)
+	TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(REPORT_KEYBOARD)),
+	TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(REPORT_MOUSE))
 };
 
 // Invoked when received GET HID REPORT DESCRIPTOR
@@ -96,7 +91,7 @@ enum {
 	ITF_NUM_CDC_0_DATA,
 	ITF_NUM_TOTAL
 };
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + CFG_TUD_CDC * TUD_CDC_DESC_LEN + TUD_HID_INOUT_DESC_LEN)
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + CFG_TUD_CDC * TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN)
 #define EPNUM_HID 0x01
 #define EPNUM_CDC_0_NOTIF 0x84
 #define EPNUM_CDC_0_OUT 0x04
@@ -105,13 +100,13 @@ enum {
 uint8_t const desc_fs_configuration[] = {
 	// Config number, interface count, string index, total length, attribute,
 	// power in mA
-	TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 200),
+	TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0, 100),
 
-	// Interface number, string index, protocol, report descriptor len, EP Out & In address, size & polling interval
-	TUD_HID_INOUT_DESCRIPTOR(ITF_NUM_HID, 0,
+	// Keyboard and mouse share one interrupt IN endpoint, polled every millisecond.
+	TUD_HID_DESCRIPTOR(ITF_NUM_HID, 0,
 							 HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report),
-							 EPNUM_HID, 0x80 | EPNUM_HID,
-							 CFG_TUD_HID_EP_BUFSIZE, 5),
+							 0x80 | EPNUM_HID,
+							 CFG_TUD_HID_EP_BUFSIZE, 1),
 	// 1st CDC: Interface number, string index, EP notification address and
 	// size, EP data address (out, in) and size.
 	TUD_CDC_DESCRIPTOR(ITF_NUM_CDC_0, 4,
@@ -143,10 +138,10 @@ enum {
 // array of pointer to string descriptors
 char const* string_desc_arr[] = {
 	(const char[]) {0x09, 0x04}, // 0: is supported language is English (0x0409)
-	"Volwave", // 1: Manufacturer
-	"VBTT Device", // 2: Product
-	"000001", // 3: Serials, should use chip ID
-	"VBTT CDC", // 4: CDC Interface
+	"Nigh", // 1: Manufacturer
+	"TCS3200 Sensor Kit", // 2: Product
+	"", // 3: Replaced with the board's unique ID below.
+	"TCS3200 Data", // 4: CDC Interface
 };
 
 static uint16_t _desc_str[32 + 1];
@@ -165,7 +160,12 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 		default:
 			if(!(index < sizeof(string_desc_arr) / sizeof(string_desc_arr[0]))) return NULL;
 
+			char serial[2 * PICO_UNIQUE_BOARD_ID_SIZE_BYTES + 1];
 			const char* str = string_desc_arr[index];
+			if(index == STRID_SERIAL) {
+				pico_get_unique_board_id_string(serial, sizeof(serial));
+				str = serial;
+			}
 
 			// Cap at max char
 			chr_count = strlen(str);

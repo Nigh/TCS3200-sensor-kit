@@ -1,0 +1,24 @@
+.program sensor_period
+; Discard a complete period after selecting a filter, then measure rising-to-rising.
+mov x, ~null
+wait 0 pin 0
+wait 1 pin 0
+wait 0 pin 0
+wait 1 pin 0
+count_high:
+    jmp x-- high_test
+high_test:
+    jmp pin high_continue
+    jmp count_low
+high_continue:
+    jmp count_high
+count_low:
+    jmp x-- low_test
+low_test:
+    jmp pin done
+    jmp count_low
+done:
+    mov isr, ~x
+    push block
+park:
+    jmp park
