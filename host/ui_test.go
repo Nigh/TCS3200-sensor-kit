@@ -19,7 +19,7 @@ func testApp(t *testing.T, populated bool) *app {
 		b.state = "合成演示"
 		s.demo = true
 		b.message = "合成测试数据 · 非真实传感器读数"
-		b.status = deviceStatus{rate: 1000, slot: 250, low: 15000}
+		b.status = deviceStatus{rate: 1000, slot: 250, low: 20000}
 		for i := range 12000 {
 			v := sample{sequence: uint32(i), micros: uint64(i * 1000)}
 			for ch := range 4 {
@@ -126,4 +126,69 @@ func TestEmptyUI(t *testing.T) {
 		t.Fatal("empty state")
 	}
 	saveScreen(t, "empty", u)
+}
+
+func TestThresholdClampsAndPreviewsRate(t *testing.T) {
+	b := newBackend()
+	p := newFake()
+	b.open = func(string) (port, error) { return p, nil }
+	b.connect("fake")
+	waitFor(t, func() bool { return stateIs(b, "已连接") })
+	defer b.disconnect()
+	s := newApp(b)
+	s.invalidateStarted = true
+	u := ui.NewTester(s.view, 1080, 760)
+	if !u.HasText("当前最大 814 Hz") {
+		t.Fatal("device rate missing")
+	}
+	if err := u.Click("低频阈值，4000 到 600000 Hz"); err != nil {
+		t.Fatal(err)
+	}
+	u.Key(ui.Ctrl, ui.KeyA)
+	u.Type("1")
+	if !u.HasText("所填阈值最大 240 Hz") {
+		t.Fatal("draft rate missing")
+	}
+	if err := u.Click("TCS3200 测量台"); err != nil {
+		t.Fatal(err)
+	}
+	if s.lowInput != "4000" {
+		t.Fatal("blur did not clamp", s.lowInput)
+	}
+	if err := u.Click("低频阈值，4000 到 600000 Hz"); err != nil {
+		t.Fatal(err)
+	}
+	u.Key(ui.Ctrl, ui.KeyA)
+	u.Type("9999999")
+	if err := u.Click("应用"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { b.mu.Lock(); defer b.mu.Unlock(); return !b.adjusting && b.status.low == lowMaxHz })
+	u.Frame()
+	if s.lowInput != "600000" || !u.HasText("当前最大 1000 Hz") {
+		t.Fatal("submit did not clamp", s.lowInput)
+	}
+	saveScreen(t, "threshold", u)
+}
+func TestVariableCadenceChart(t *testing.T) {
+	s := testApp(t, false)
+	b := s.backend
+	b.state = "合成演示"
+	s.demo = true
+	b.status = deviceStatus{rate: 240, slot: 1040, low: 4000}
+	for i := range 2404 {
+		b.history.add(sample{sequence: uint32(i), micros: uint64(i) * 4160, values: [4]uint16{1000, 2000, 3000, 4000}})
+	}
+	u := ui.NewTester(s.view, 1080, 760)
+	for _, pc := range s.plots {
+		for _, y := range pc.by {
+			if math.IsNaN(float64(y)) {
+				t.Fatal("valid low-rate samples broken into gaps")
+			}
+		}
+	}
+	if !u.HasText("当前最大 240 Hz") {
+		t.Fatal("low rate missing")
+	}
+	saveScreen(t, "low-rate", u)
 }

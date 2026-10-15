@@ -23,6 +23,7 @@ type app struct {
 	backend            *backend
 	selected, lowInput string
 	inputInitialized   bool
+	lowFocused         bool
 	epoch              uint64
 	live, snapshot     []sample
 	paused             bool
@@ -238,7 +239,13 @@ func (s *app) view(c *ui.Context) {
 			ui.Text(c, "TCS3200 测量台").FontSize(22).Bold()
 			ui.Text(c, state).TextColor(s.theme.Accent)
 			ui.Box(c).Grow(1)
-			ui.Text(c, "RGB + CLEAR · 1 kHz").TextColor(s.theme.TextMuted).FontSize(12)
+			ui.Text(c, func() string {
+				if status.rate == 0 {
+					return "RGB + CLEAR · 等待设备"
+				}
+				return fmt.Sprintf("RGB + CLEAR · 当前最大 %d Hz", status.rate)
+			}()).TextColor(s.theme.TextMuted).FontSize(12)
+			ui.Textf(c, "所填阈值最大 %d Hz", maximumRateHz(clampedLowInput(s.lowInput, status.low))).FontSize(12).TextColor(s.theme.TextMuted)
 		})
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			label := "枚举设备"
@@ -263,17 +270,16 @@ func (s *app) view(c *ui.Context) {
 			}
 			ui.Box(c).Grow(1)
 			ui.Text(c, "低频阈值 / Hz").TextColor(s.theme.TextMuted)
-			ui.TextInput(c, &s.lowInput).Width(100).Label("低频阈值，10000 到 600000 Hz").Disabled(state != "已连接" || busy)
-			if ui.Button(c, "应用").Disabled(state != "已连接" || busy || status.mode != 0 || status.state != 0).Tooltip("范围 10000–600000 Hz；应用后已有测试配置失效").Clicked() {
-				v, err := strconv.ParseUint(s.lowInput, 10, 32)
-				if err != nil || v < 10000 || v > 600000 {
-					b.mu.Lock()
-					b.message = "请输入 10000–600000 之间的整数 Hz"
-					b.dirty = true
-					b.mu.Unlock()
-				} else {
-					b.setLow(uint32(v))
-				}
+			input := ui.TextInput(c, &s.lowInput).Width(100).Label("低频阈值，4000 到 600000 Hz").Tooltip("离开输入框或应用时自动限制到 4000–600000 Hz").Disabled(state != "已连接" || busy)
+			focused := input.Focused()
+			if s.lowFocused && !focused {
+				s.lowInput = strconv.FormatUint(uint64(clampedLowInput(s.lowInput, status.low)), 10)
+			}
+			s.lowFocused = focused
+			if ui.Button(c, "应用").Disabled(state != "已连接" || busy || status.mode != 0 || status.state != 0).Tooltip("范围 4000–600000 Hz；应用后已有测试配置失效").Clicked() {
+				v := clampedLowInput(s.lowInput, status.low)
+				s.lowInput = strconv.FormatUint(uint64(v), 10)
+				b.setLow(v)
 			}
 		})
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -411,7 +417,7 @@ func (s *app) plot(c *ui.Context, ch int) {
 							continue
 						}
 						x := float32((float64(v.micros) - lo) / s.span)
-						if !first && (v.sequence-prev.sequence != 1 || v.micros-prev.micros != 1000) {
+						if !first && (v.sequence-prev.sequence != 1 || v.micros <= prev.micros) {
 							pc.xs = append(pc.xs, x)
 							pc.ys = append(pc.ys, float32(math.NaN()))
 						}
@@ -461,7 +467,7 @@ func main() {
 }
 func startDemo(b *backend, stop <-chan struct{}) {
 	b.message = "合成演示数据 · 非真实传感器读数"
-	b.status = deviceStatus{rate: 1000, slot: 250, low: 15000}
+	b.status = deviceStatus{rate: 1000, slot: 250, low: 20000}
 	b.dirty = true
 	go func() {
 		ticker := time.NewTicker(10 * time.Millisecond)

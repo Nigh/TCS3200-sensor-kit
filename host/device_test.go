@@ -42,8 +42,9 @@ func (p *fakePort) Write(b []byte) (int, error) {
 	d.feed(b, func(f frame) {
 		if f.kind == cmdStatus {
 			data := make([]byte, 32)
-			data[0], data[1] = 0xe8, 3
-			data[2] = 250
+			rate, slot := maximumRateHz(p.low), channelSlotUS(p.low)
+			data[0], data[1] = byte(rate), byte(rate>>8)
+			data[2], data[3] = byte(slot), byte(slot>>8)
 			put32(data[4:], p.low)
 			p.input <- encode(msgStatus, f.sequence, data)
 		} else if f.kind == cmdLow {

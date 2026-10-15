@@ -17,7 +17,7 @@ func TestProtocolVectors(t *testing.T) {
 	if crc16([]byte("123456789")) != 0x29b1 {
 		t.Fatal("CRC")
 	}
-	vectors := [][]byte{unhex("54430101010000005597"), unhex("5443010202000100005cb1"), unhex("544301800200020002005edd"), unhex("5443010603000400983a0000185b"), unhex("544301400000160000000000a086010000000000000000000f0000000000d49e")}
+	vectors := [][]byte{unhex("5443020101000000b559"), unhex("544302020200010000de69"), unhex("544302800200020002002b15"), unhex("5443020603000400983a0000d7ea"), unhex("544302400000160000000000a086010000000000000000000f000000000068f3")}
 	for _, v := range vectors {
 		for split := 0; split <= len(v); split++ {
 			var d decoder
@@ -48,7 +48,7 @@ func TestProtocolVectors(t *testing.T) {
 }
 func TestSampleVector(t *testing.T) {
 	var d decoder
-	d.feed(unhex("544301400000160000000000a086010000000000000000000f0000000000d49e"), func(f frame) {
+	d.feed(unhex("544302400000160000000000a086010000000000000000000f000000000068f3"), func(f frame) {
 		s, ok := decodeSample(f)
 		if !ok || s.micros != 100000 || s.low != 15 {
 			t.Fatal(s, ok)
@@ -59,7 +59,7 @@ func TestSampleVector(t *testing.T) {
 func TestInvalidHeaderAndMalformedSample(t *testing.T) {
 	var d decoder
 	n := 0
-	garbage := []byte{0x54, 0x43, 2, 1, 0, 0, 0, 0, 0x54, 0x43, 1, 1, 0, 0, 65, 0}
+	garbage := []byte{0x54, 0x43, 1, 1, 0, 0, 0, 0, 0x54, 0x43, 2, 1, 0, 0, 65, 0}
 	d.feed(append(garbage, encode(cmdStatus, 1, nil)...), func(frame) { n++ })
 	if n != 1 || d.errors != 2 {
 		t.Fatal(n, d.errors)

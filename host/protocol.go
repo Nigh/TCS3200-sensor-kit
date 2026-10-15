@@ -32,7 +32,7 @@ func crc16(data []byte) uint16 {
 }
 func encode(kind byte, sequence uint16, payload []byte) []byte {
 	b := make([]byte, 10+len(payload))
-	b[0], b[1], b[2], b[3] = 0x54, 0x43, 1, kind
+	b[0], b[1], b[2], b[3] = 0x54, 0x43, protocolVersion, kind
 	binary.LittleEndian.PutUint16(b[4:], sequence)
 	binary.LittleEndian.PutUint16(b[6:], uint16(len(payload)))
 	copy(b[8:], payload)
@@ -63,7 +63,7 @@ func (d *decoder) feed(data []byte, accept func(frame)) {
 				break
 			}
 			n := int(binary.LittleEndian.Uint16(d.buf[6:]))
-			if d.buf[2] != 1 || n > 64 {
+			if d.buf[2] != protocolVersion || n > 64 {
 				d.errors++
 				d.buf = d.buf[1:]
 				continue
@@ -116,5 +116,5 @@ func decodeStatus(p []byte) (deviceStatus, bool) {
 	for i, dst := range fields {
 		*dst = binary.LittleEndian.Uint32(p[4+4*i:])
 	}
-	return s, s.rate == 1000 && s.slot == 250 && s.mode <= 1 && s.state <= 5 && s.configured <= 1 && p[31] == 0
+	return s, s.low >= lowMinHz && s.low <= lowMaxHz && s.rate == maximumRateHz(s.low) && uint32(s.slot) == channelSlotUS(s.low) && s.mode <= 1 && s.state <= 5 && s.configured <= 1 && p[31] == 0
 }

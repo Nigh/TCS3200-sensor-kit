@@ -111,7 +111,7 @@ The hierarchy favors legible Chinese controls and consistently formatted numeric
 
 ## Layout
 
-The shipped window opens at 1280 × 900 and has a 1080 × 760 minimum. The outer column uses the workspace inset and section gap tokens. A title/state row precedes the USB/threshold toolbar, then a compact inspection row. A growing, equal-fraction 2 × 2 plot grid fills the remaining space, followed by persistent message and quality rows.
+The shipped window opens at 1280 × 900 and has a 1080 × 760 minimum. The outer column uses the workspace inset and section gap tokens. A title/state row precedes the USB/threshold toolbar, with applied and draft maximum sampling rates shown in the heading, then a compact inspection row. A growing, equal-fraction 2 × 2 plot grid fills the remaining space, followed by persistent message and quality rows.
 
 The plot grid has a native logical minimum height of 400; each chart has a minimum height of 120. Panel contents use the panel inset and group gap. Chart axes use the axis gap. A statistics strip reserves at least 36 logical units beneath each chart so inspection does not cover the waveform or shift its geometry. The device selector is 330 logical units wide and the threshold field is 100.
 
@@ -129,7 +129,7 @@ Gently rounded controls and measurement panels share the radius tokens. Plot geo
 
 ### Native controls
 
-Use MyGo `Button`, `PrimaryButton`, `Select` and `TextInput`. Connection is the pink primary action; enumeration, disconnect, apply, pause and return-to-live use standard buttons. Preserve framework hover, keyboard focus and disabled states rather than inventing parallel styling. The selector and threshold field retain their accessible labels. Busy, disconnected and invalid-selection states disable the relevant controls.
+Use MyGo `Button`, `PrimaryButton`, `Select` and `TextInput`. Connection is the pink primary action; enumeration, disconnect, apply, pause and return-to-live use standard buttons. Preserve framework hover, keyboard focus and disabled states rather than inventing parallel styling. The selector and threshold field retain their accessible labels. Threshold edits normalize on blur or apply, within 4000–600000 Hz; rate preview is distinguished from the device-applied maximum. Busy, disconnected and invalid-selection states disable the relevant controls.
 
 ### Measurement panel
 

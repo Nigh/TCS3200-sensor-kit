@@ -212,7 +212,7 @@ func (b *backend) connect(path string) {
 		if b.conn == c {
 			b.status = status
 			b.state = "已连接"
-			b.message = "实时采集 · 1000 组/秒"
+			b.message = fmt.Sprintf("实时采集 · 最大 %d 组/秒", status.rate)
 			b.dirty = true
 		}
 		b.mu.Unlock()
@@ -245,7 +245,7 @@ func (b *backend) getStatus(c *connection) (deviceStatus, error) {
 	}
 	s, ok := decodeStatus(f.payload)
 	if !ok {
-		return s, errors.New("设备状态或采样率与协议 v1 不兼容")
+		return s, errors.New("设备状态或采样率与协议 v2 不兼容")
 	}
 	return s, nil
 }
@@ -332,10 +332,11 @@ func (b *backend) disconnect() {
 	}
 }
 func (b *backend) setLow(value uint32) {
+	value = max(lowMinHz, min(lowMaxHz, value))
 	b.mu.Lock()
 	c := b.conn
-	if c == nil || b.state != "已连接" || b.adjusting || value < 10000 || value > 600000 || b.status.mode != 0 || b.status.state != 0 {
-		b.message = "阈值仅可在测量模式 WAIT 状态设置为 10000–600000 Hz"
+	if c == nil || b.state != "已连接" || b.adjusting || b.status.mode != 0 || b.status.state != 0 {
+		b.message = "阈值仅可在测量模式 WAIT 状态设置为 4000–600000 Hz"
 		b.dirty = true
 		b.mu.Unlock()
 		return

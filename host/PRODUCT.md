@@ -12,10 +12,10 @@ MyGo native UI and chart primitives; USB CDC through go.bug.st/serial. No web fr
 Sensor-kit operators measuring screen light on the current Linux desktop.
 
 ## Product Purpose
-Observe four 1 kHz TCS3200 frequency channels, inspect short time ranges and pixel-bucket statistics, and adjust the physical measurement low-frequency threshold.
+Observe four TCS3200 frequency channels at a threshold-dependent maximum cadence of 240–1000 Hz, inspect short time ranges and pixel-bucket statistics, and adjust the physical measurement low-frequency threshold.
 
 ## Capabilities and Constraints
-Manual device enumeration, selection and connection; latest ten seconds only; frozen snapshot while USB reception continues; robust disconnect handling. Protocol v1 in ../docs/protocol.md remains authoritative. No test-mode controls, HID actions, BOOTSEL, export or longer history in this version.
+Manual device enumeration, selection and connection; latest ten seconds only; frozen snapshot while USB reception continues; robust disconnect handling. Low threshold is clamped to 4000–600000 Hz on blur/submit, and applied/draft maximum sample rates are displayed. Firmware and host require matching v2; nominal cadence is floor(1000000/(4*max(250,ceil(4000000/low_hz)+40))) Hz. Protocol v2 in ../docs/protocol.md remains authoritative. No test-mode controls, HID actions, BOOTSEL, export or longer history in this version.
 
 ## Brand Commitments
 Chinese UI. Xianii dark theme, translated into native UI tokens. Direct implementation without generated mockups, as selected by the user.
