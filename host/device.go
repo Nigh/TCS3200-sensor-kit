@@ -84,6 +84,7 @@ func (c *connection) request(kind byte, payload []byte) (frame, error) {
 }
 
 type backend struct {
+	resetID                       uint64
 	mu                            sync.Mutex
 	devices                       []device
 	state, message                string
@@ -183,6 +184,7 @@ func (b *backend) connect(path string) {
 			return
 		}
 		b.conn = c
+		b.resetID++
 		b.history = history{}
 		b.parserErrors = 0
 		b.discardUntil = 0
@@ -357,6 +359,7 @@ func (b *backend) setLow(value uint32) {
 		rawCutoff := uint32(status.uptime*1000) + 100000
 		delta := int64(int32(rawCutoff - b.history.lastRaw))
 		b.discardUntil = uint64(max(int64(b.history.elapsed)+delta, 0))
+		b.resetID++
 		b.history.head, b.history.size = 0, 0
 		b.message = "阈值已更新；已有测试配置失效，等待新采样"
 		b.dirty = true
