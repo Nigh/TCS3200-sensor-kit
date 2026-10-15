@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,15 +115,19 @@ func newBackend() *backend {
 		if err != nil {
 			return nil, err
 		}
-		var ds []device
-		for _, p := range ports {
-			if p.IsUSB && p.VID == "ACDC" && p.PID == "4015" {
-				ds = append(ds, device{p.Name, fmt.Sprintf("%s · %s", p.Name, p.SerialNumber)})
-			}
-		}
-		return ds, nil
+		return sensorDevices(ports), nil
 	}}
 }
+func sensorDevices(ports []*enumerator.PortDetails) []device {
+	var ds []device
+	for _, p := range ports {
+		if p.IsUSB && strings.EqualFold(p.VID, "ACDC") && p.PID == "4015" {
+			ds = append(ds, device{p.Name, fmt.Sprintf("%s · %s", p.Name, p.SerialNumber)})
+		}
+	}
+	return ds
+}
+
 func (b *backend) scan() {
 	b.mu.Lock()
 	if b.enumerating {

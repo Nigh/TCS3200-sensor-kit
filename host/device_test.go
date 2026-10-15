@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"go.bug.st/serial/enumerator"
 	"io"
 	"sync"
 	"testing"
@@ -153,5 +154,19 @@ func TestCancelledOpenCannotReplaceNewSession(t *testing.T) {
 	}
 	if !stateIs(b, "未连接") {
 		t.Fatal("stale open changed state")
+	}
+}
+
+func TestSensorDeviceEnumeration(t *testing.T) {
+	ports := []*enumerator.PortDetails{
+		{Name: "/dev/ttyACM0", IsUSB: true, VID: "acdc", PID: "4015", SerialNumber: "lowercase"},
+		{Name: "/dev/ttyACM1", IsUSB: true, VID: "ACDC", PID: "4015", SerialNumber: "uppercase"},
+		{Name: "/dev/ttyACM2", IsUSB: true, VID: "acdc", PID: "0000"},
+		{Name: "/dev/ttyACM3", IsUSB: true, VID: "0000", PID: "4015"},
+		{Name: "/dev/ttyS0", IsUSB: false, VID: "acdc", PID: "4015"},
+	}
+	got := sensorDevices(ports)
+	if len(got) != 2 || got[0].path != "/dev/ttyACM0" || got[1].path != "/dev/ttyACM1" {
+		t.Fatal(got)
 	}
 }
