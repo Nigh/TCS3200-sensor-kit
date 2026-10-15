@@ -90,6 +90,7 @@ func (c *connection) request(kind byte, payload []byte) (frame, error) {
 }
 
 type backend struct {
+	sampleDirty                   bool
 	resetID                       uint64
 	mu                            sync.Mutex
 	devices                       []device
@@ -270,7 +271,7 @@ func (b *backend) receive(c *connection) {
 							}
 						}
 						b.parserErrors = d.errors
-						b.dirty = true
+						b.sampleDirty = true
 					}
 					b.mu.Unlock()
 				} else if f.kind == msgACK || f.kind == msgStatus {

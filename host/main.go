@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -25,6 +26,7 @@ type app struct {
 	epoch              uint64
 	live, snapshot     []sample
 	paused             bool
+	refreshPaused      atomic.Bool
 	end, span          float64
 	hover              float64
 	hoverFraction      float64
@@ -68,10 +70,12 @@ func (s *app) freeze() {
 	if !s.paused {
 		s.snapshot = append(s.snapshot[:0], s.live...)
 		s.paused = true
+		s.refreshPaused.Store(true)
 	}
 }
 func (s *app) resume() {
 	s.paused = false
+	s.refreshPaused.Store(false)
 	s.drag = false
 	s.hovering = false
 	s.span = float64(windowUS)
@@ -173,8 +177,9 @@ func (s *app) view(c *ui.Context) {
 					return
 				case <-ticker.C:
 					s.backend.mu.Lock()
-					dirty := s.backend.dirty
+					dirty := s.backend.dirty || s.backend.sampleDirty && !s.refreshPaused.Load()
 					s.backend.dirty = false
+					s.backend.sampleDirty = false
 					s.backend.mu.Unlock()
 					if dirty {
 						invalidate()
@@ -193,6 +198,7 @@ func (s *app) view(c *ui.Context) {
 	if s.epoch != b.resetID {
 		s.epoch = b.resetID
 		s.paused = false
+		s.refreshPaused.Store(false)
 		s.snapshot = s.snapshot[:0]
 		s.live = s.live[:0]
 		s.inputInitialized = false
@@ -481,7 +487,7 @@ func startDemo(b *backend, stop <-chan struct{}) {
 					}
 					b.history.add(v)
 				}
-				b.dirty = true
+				b.sampleDirty = true
 				b.mu.Unlock()
 			}
 		}
