@@ -9,12 +9,13 @@ import (
 )
 
 type fakePort struct {
-	input  chan []byte
-	closed chan struct{}
-	once   sync.Once
-	mu     sync.Mutex
-	low    uint32
-	silent bool
+	rejectLow bool
+	input     chan []byte
+	closed    chan struct{}
+	once      sync.Once
+	mu        sync.Mutex
+	low       uint32
+	silent    bool
 }
 
 func newFake() *fakePort {
@@ -45,6 +46,10 @@ func (p *fakePort) Write(b []byte) (int, error) {
 			put32(data[4:], p.low)
 			p.input <- encode(msgStatus, f.sequence, data)
 		} else if f.kind == cmdLow {
+			if p.rejectLow {
+				p.input <- encode(msgACK, f.sequence, []byte{cmdLow, 4})
+				return
+			}
 			p.low = uint32(f.payload[0]) | uint32(f.payload[1])<<8 | uint32(f.payload[2])<<16 | uint32(f.payload[3])<<24
 			p.input <- encode(msgACK, f.sequence, []byte{cmdLow, 0})
 		}
@@ -115,5 +120,38 @@ func TestCommandTimeoutAndCancel(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("request leaked")
+	}
+}
+
+func TestRejectedThresholdKeepsConnection(t *testing.T) {
+	b := newBackend()
+	p := newFake()
+	p.rejectLow = true
+	b.open = func(string) (port, error) { return p, nil }
+	b.connect("fake")
+	waitFor(t, func() bool { return stateIs(b, "已连接") })
+	defer b.disconnect()
+	b.setLow(16000)
+	waitFor(t, func() bool { b.mu.Lock(); defer b.mu.Unlock(); return !b.adjusting })
+	if !stateIs(b, "已连接") {
+		t.Fatal("rejection disconnected a healthy device")
+	}
+}
+func TestCancelledOpenCannotReplaceNewSession(t *testing.T) {
+	b := newBackend()
+	p := newFake()
+	started, release := make(chan struct{}), make(chan struct{})
+	b.open = func(string) (port, error) { close(started); <-release; return p, nil }
+	b.connect("fake")
+	<-started
+	b.disconnect()
+	close(release)
+	select {
+	case <-p.closed:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled port leaked")
+	}
+	if !stateIs(b, "未连接") {
+		t.Fatal("stale open changed state")
 	}
 }

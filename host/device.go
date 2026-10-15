@@ -20,6 +20,12 @@ type port interface {
 	SetDTR(bool) error
 	SetReadTimeout(time.Duration) error
 }
+type commandRejected byte
+
+func (r commandRejected) Error() string {
+	return fmt.Sprintf("设备拒绝命令，结果码 %d", byte(r))
+}
+
 type connection struct {
 	port      port
 	done      chan struct{}
@@ -72,7 +78,7 @@ func (c *connection) request(kind byte, payload []byte) (frame, error) {
 					return frame{}, errors.New("ACK 格式错误")
 				}
 				if f.payload[1] != 0 {
-					return frame{}, fmt.Errorf("设备拒绝命令，结果码 %d", f.payload[1])
+					return frame{}, commandRejected(f.payload[1])
 				}
 			}
 			if f.kind != expected {
@@ -100,7 +106,7 @@ type backend struct {
 }
 
 func newBackend() *backend {
-	return &backend{state: "未连接", open: func(path string) (port, error) {
+	return &backend{state: "未连接", message: "点击枚举设备，选择传感器后连接", open: func(path string) (port, error) {
 		return serial.Open(path, &serial.Mode{BaudRate: 115200, DataBits: 8, StopBits: serial.OneStopBit, InitialStatusBits: &serial.ModemOutputBits{DTR: true}})
 	}, enumerate: func() ([]device, error) {
 		ports, err := enumerator.GetDetailedPortsList()
@@ -336,6 +342,17 @@ func (b *backend) setLow(value uint32) {
 		binary.LittleEndian.PutUint32(p[:], value)
 		_, err := c.request(cmdLow, p[:])
 		if err != nil {
+			var rejected commandRejected
+			if errors.As(err, &rejected) {
+				b.mu.Lock()
+				if b.conn == c {
+					b.adjusting = false
+					b.message = err.Error() + "；请等待设备回到测量 WAIT 状态"
+					b.dirty = true
+				}
+				b.mu.Unlock()
+				return
+			}
 			b.fail(c, err)
 			return
 		}

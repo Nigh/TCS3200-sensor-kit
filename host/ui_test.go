@@ -16,6 +16,8 @@ func testApp(t *testing.T, populated bool) *app {
 	s := newApp(b)
 	s.invalidateStarted = true
 	if populated {
+		b.state = "合成演示"
+		s.demo = true
 		b.message = "合成测试数据 · 非真实传感器读数"
 		b.status = deviceStatus{rate: 1000, slot: 250, low: 15000}
 		for i := range 12000 {
@@ -63,7 +65,7 @@ func TestMeasurementUI(t *testing.T) {
 	}
 	u.Move(r.X+r.W/2, r.Y+r.H/2)
 	if !u.HasText("中位数") || !u.HasText("n=") {
-		t.Fatal("hover statistics")
+		t.Fatalf("hover statistics: r=%+v hover=%v fraction=%v channel=%v texts=%v", r, s.hovering, s.hoverFraction, s.hoverChannel, u.Texts())
 	}
 	saveScreen(t, "desktop", u)
 	if err := u.Click("暂停刷新"); err != nil {
@@ -87,6 +89,17 @@ func TestMeasurementUI(t *testing.T) {
 	u.Press(r.X+r.W/2, r.Y+r.H/2)
 	u.Move(r.X+r.W*.7, r.Y+r.H/2)
 	u.Release(r.X+r.W*.7, r.Y+r.H/2)
+	beforeKey := s.span
+	u.Key(ui.Shift, ui.KeyEqual)
+	if s.span >= beforeKey {
+		t.Fatal("focused keyboard zoom")
+	}
+	u.Move(r.X+r.W+40, r.Y+r.H+40)
+	u.Frame()
+	if s.hovering {
+		t.Fatal("hover did not clear")
+	}
+
 	if err := u.Click("回到实时"); err != nil {
 		t.Fatal(err)
 	}

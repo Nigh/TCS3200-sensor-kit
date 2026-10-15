@@ -55,3 +55,19 @@ func TestSampleVector(t *testing.T) {
 		}
 	})
 }
+
+func TestInvalidHeaderAndMalformedSample(t *testing.T) {
+	var d decoder
+	n := 0
+	garbage := []byte{0x54, 0x43, 2, 1, 0, 0, 0, 0, 0x54, 0x43, 1, 1, 0, 0, 65, 0}
+	d.feed(append(garbage, encode(cmdStatus, 1, nil)...), func(frame) { n++ })
+	if n != 1 || d.errors != 2 {
+		t.Fatal(n, d.errors)
+	}
+	if _, ok := decodeSample(frame{kind: msgSample, payload: make([]byte, 21)}); ok {
+		t.Fatal("short sample")
+	}
+	if _, ok := decodeSample(frame{kind: msgSample, sequence: 1, payload: make([]byte, 22)}); ok {
+		t.Fatal("sequence mismatch")
+	}
+}

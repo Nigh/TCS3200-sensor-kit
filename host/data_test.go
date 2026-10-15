@@ -57,3 +57,41 @@ func TestMinmaxAndStats(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestThreeMinutesOfSamplesStayBounded(t *testing.T) {
+	var h history
+	for i := range 180000 {
+		h.add(sample{sequence: uint32(i), micros: uint64(i) * 1000})
+	}
+	if h.size != capacity || h.drops != 0 {
+		t.Fatal(h.size, h.drops)
+	}
+	data := h.copyTo(nil)
+	if data[0].micros != 169999000 || data[len(data)-1].micros != 179999000 {
+		t.Fatal("retention window")
+	}
+}
+func BenchmarkMinMax(b *testing.B) {
+	xs, ys := make([]float32, 10001), make([]float32, 10001)
+	for i := range xs {
+		xs[i] = float32(i) / 10000
+		ys[i] = float32(math.Sin(float64(i) * .07))
+	}
+	var x, y []float32
+	x, y = minmax(x, y, xs, ys, 1000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		x, y = minmax(x, y, xs, ys, 1000)
+	}
+}
+
+func TestSequenceWrap(t *testing.T) {
+	var h history
+	h.add(sample{sequence: 0xfffffffe, micros: 1000})
+	h.add(sample{sequence: 0xffffffff, micros: 2000})
+	h.add(sample{sequence: 0, micros: 3000})
+	if h.size != 3 || h.drops != 0 {
+		t.Fatal(h.size, h.drops)
+	}
+}

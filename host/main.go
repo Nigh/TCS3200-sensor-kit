@@ -27,10 +27,12 @@ type app struct {
 	paused             bool
 	end, span          float64
 	hover              float64
+	hoverFraction      float64
 	hovering           bool
 	hoverChannel       int
 	demo               bool
 	plotPixels         [4]int
+	plotWidths         [4]float32
 	drag               bool
 	dragX, dragEnd     float64
 	plots              [4]plotCache
@@ -93,12 +95,42 @@ func (s *app) zoom(factor, anchor float64) {
 	s.end += (s.span - old) * (1 - anchor)
 	s.clamp()
 }
-func (s *app) input(ev ui.InputEvent, width float32) bool {
+func (s *app) input(ev ui.InputEvent, width float32, ch int) bool {
 	if width <= 0 {
 		return false
 	}
 	switch ev.Kind {
+	case ui.InputKeyDown:
+		if len(s.data()) == 0 {
+			return false
+		}
+		if ev.Key == ui.KeyEqual && (ev.Mods == 0 || ev.Mods == ui.Shift) {
+			s.zoom(.8, .5)
+			return true
+		}
+		if ev.Mods != 0 {
+			return false
+		}
+		switch ev.Key {
+		case ui.KeyMinus:
+			s.zoom(1.25, .5)
+			return true
+		case ui.KeyLeft:
+			s.freeze()
+			s.end -= s.span * .1
+			s.clamp()
+			return true
+		case ui.KeyRight:
+			s.freeze()
+			s.end += s.span * .1
+			s.clamp()
+			return true
+		}
+
 	case ui.InputScroll:
+		s.hoverFraction = max(0, min(1, float64(ev.X/width)))
+		s.hoverChannel = ch
+		s.hovering = true
 		s.zoom(math.Exp(float64(ev.DY)*.003), max(0, min(1, float64(ev.X/width))))
 		return true
 	case ui.InputPointerDown:
@@ -110,11 +142,15 @@ func (s *app) input(ev ui.InputEvent, width float32) bool {
 			return true
 		}
 	case ui.InputPointerMove:
+		s.hoverFraction = max(0, min(1, float64(ev.X/width)))
+		s.hoverChannel = ch
+		s.hovering = true
 		if s.drag {
 			s.end = s.dragEnd - (float64(ev.X)-s.dragX)/float64(width)*s.span
 			s.clamp()
 			return true
 		}
+		return true
 	case ui.InputPointerUp:
 		if s.drag {
 			s.drag = false
@@ -191,24 +227,6 @@ func (s *app) view(c *ui.Context) {
 		s.resume()
 	}
 	data := s.data()
-	if len(data) > 0 {
-		if c.Shortcut(0, ui.KeyEqual) {
-			s.zoom(.8, .5)
-		}
-		if c.Shortcut(0, ui.KeyMinus) {
-			s.zoom(1.25, .5)
-		}
-		if c.Shortcut(0, ui.KeyLeft) {
-			s.freeze()
-			s.end -= s.span * .1
-			s.clamp()
-		}
-		if c.Shortcut(0, ui.KeyRight) {
-			s.freeze()
-			s.end += s.span * .1
-			s.clamp()
-		}
-	}
 	ui.Column(c).Fill().Padding(20).Gap(12).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(16).Children(func() {
 			ui.Text(c, "TCS3200 测量台").FontSize(22).Bold()
@@ -286,13 +304,20 @@ func (s *app) view(c *ui.Context) {
 			}
 			return s.theme.TextMuted
 		}()).FontSize(13)
-		ui.Textf(c, "采样丢组 %d · 设备采集丢组 %d · 发送丢组 %d · 解码错误 %d · 设备协议错误 %d · 阈值 %.2f kHz", drops, status.captureDrops, status.streamDrops, errors, status.parserErrors, float64(status.low)/1000).FontSize(12).TextColor(s.theme.TextMuted)
+		threshold := "—"
+		if status.low > 0 {
+			threshold = fmt.Sprintf("%.2f kHz", float64(status.low)/1000)
+		}
+		ui.Textf(c, "采样丢组 %d · 设备采集丢组 %d · 发送丢组 %d · 解码错误 %d · 设备协议错误 %d · 阈值 %s", drops, status.captureDrops, status.streamDrops, errors, status.parserErrors, threshold).FontSize(12).TextColor(s.theme.TextMuted)
 	})
 }
 func (s *app) plot(c *ui.Context, ch int) {
 	names := [4]string{"R · 红通道", "G · 绿通道", "B · 蓝通道", "Clear · 透明通道"}
 	colors := [4]ui.Color{ui.Hex("#ff9db1"), ui.Hex("#8bd5a3"), ui.Hex("#8bbdf0"), ui.Hex("#d3b1f4")}
 	data := s.data()
+	if s.hovering {
+		s.hover = s.end - s.span + s.hoverFraction*s.span
+	}
 	lo, hi := s.end-s.span, s.end
 	pc := &s.plots[ch]
 	var last sample
@@ -333,22 +358,13 @@ func (s *app) plot(c *ui.Context, ch int) {
 		var statsText = "悬停查看时间桶与样本数\nMax / Min / 中位数 · kHz"
 		chart.Plot(c, chart.Axes{Left: yscale.Ticks(4), Bottom: xticks}, func(area ui.Element) {
 			area.Label(names[ch] + "，单位 kHz").Description("最近十秒；滚轮缩放，拖动平移，方向键浏览").Focusable()
-			bounds := area.Bounds()
-			width := bounds.W
-			area.HandleInput(func(ev ui.InputEvent) bool { return s.input(ev, width) })
-			x, _, over := area.PointerPosition()
-			if over && width > 0 {
-				next := lo + float64(x/width)*s.span
-				if !s.hovering || s.hover != next || s.hoverChannel != ch {
-					c.Invalidate()
-				}
-				s.hover = next
-				s.hovering = true
-				s.hoverChannel = ch
-			} else if s.hoverChannel == ch && s.hovering {
-				c.Invalidate()
+			area.HandleInput(func(ev ui.InputEvent) bool { return s.input(ev, s.plotWidths[ch], ch) })
+			_, _, over := area.PointerPosition()
+			if !over && s.hoverChannel == ch && s.hovering {
 				s.hovering = false
+				c.Invalidate()
 			}
+
 			// The painter scale sets physical pixel bins; layout-time stats use the last drawn width/scale.
 			if s.hovering && s.hover >= lo && s.hover <= hi {
 				pixelWidth := max(1, s.plotPixels[ch])
@@ -367,6 +383,7 @@ func (s *app) plot(c *ui.Context, ch int) {
 				}
 			}
 			area.Draw(func(p *ui.Painter, r ui.Rect) {
+				s.plotWidths[ch] = r.W
 				pixels := max(1, int(math.Ceil(float64(r.W*p.Scale()))))
 				s.plotPixels[ch] = pixels
 				for _, tick := range yscale.Ticks(4) {
