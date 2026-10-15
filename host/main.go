@@ -241,11 +241,11 @@ func (s *app) view(c *ui.Context) {
 			ui.Box(c).Grow(1)
 			ui.Text(c, func() string {
 				if status.rate == 0 {
-					return "RGB + CLEAR · 等待设备"
+					return "当前最大采样率 —"
 				}
-				return fmt.Sprintf("RGB + CLEAR · 当前最大 %d Hz", status.rate)
+				return fmt.Sprintf("当前最大采样率 %d Hz", status.rate)
 			}()).TextColor(s.theme.TextMuted).FontSize(12)
-			ui.Textf(c, "所填阈值最大 %d Hz", maximumRateHz(clampedLowInput(s.lowInput, status.low))).FontSize(12).TextColor(s.theme.TextMuted)
+			ui.Textf(c, "所填最大采样率 %d Hz", maximumRateHz(clampedLowInput(s.lowInput, status.low))).FontSize(12).TextColor(s.theme.TextMuted)
 		})
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			label := "枚举设备"

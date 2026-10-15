@@ -45,7 +45,8 @@ void app_sample(app_t *a, const sample_t *s) {
         a->awaiting_sample = false;
     }
     if ((s->clip_mask & 7u) || s->flags ||
-        (a->confirming && (uint32_t)(s->timestamp_us - a->last_sample_us) != sample_period_us(a->config.low_hz))) {
+        (a->confirming &&
+         (uint32_t)(s->timestamp_us - a->last_sample_us) != sample_period_us(a->config.low_hz))) {
         a->confirming = false;
         return;
     }

@@ -138,7 +138,7 @@ func TestThresholdClampsAndPreviewsRate(t *testing.T) {
 	s := newApp(b)
 	s.invalidateStarted = true
 	u := ui.NewTester(s.view, 1080, 760)
-	if !u.HasText("当前最大 814 Hz") {
+	if !u.HasText("当前最大采样率 814 Hz") {
 		t.Fatal("device rate missing")
 	}
 	if err := u.Click("低频阈值，4000 到 600000 Hz"); err != nil {
@@ -146,7 +146,7 @@ func TestThresholdClampsAndPreviewsRate(t *testing.T) {
 	}
 	u.Key(ui.Ctrl, ui.KeyA)
 	u.Type("1")
-	if !u.HasText("所填阈值最大 240 Hz") {
+	if !u.HasText("所填最大采样率 240 Hz") {
 		t.Fatal("draft rate missing")
 	}
 	if err := u.Click("TCS3200 测量台"); err != nil {
@@ -165,7 +165,7 @@ func TestThresholdClampsAndPreviewsRate(t *testing.T) {
 	}
 	waitFor(t, func() bool { b.mu.Lock(); defer b.mu.Unlock(); return !b.adjusting && b.status.low == lowMaxHz })
 	u.Frame()
-	if s.lowInput != "600000" || !u.HasText("当前最大 1000 Hz") {
+	if s.lowInput != "600000" || !u.HasText("当前最大采样率 1000 Hz") {
 		t.Fatal("submit did not clamp", s.lowInput)
 	}
 	saveScreen(t, "threshold", u)
@@ -187,7 +187,7 @@ func TestVariableCadenceChart(t *testing.T) {
 			}
 		}
 	}
-	if !u.HasText("当前最大 240 Hz") {
+	if !u.HasText("当前最大采样率 240 Hz") {
 		t.Fatal("low rate missing")
 	}
 	saveScreen(t, "low-rate", u)
