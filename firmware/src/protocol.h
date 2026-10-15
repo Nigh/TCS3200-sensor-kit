@@ -4,10 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PROTOCOL_VERSION 1u
+#define PROTOCOL_VERSION 2u
 #define PROTOCOL_MAX_PAYLOAD 64u
 #define PROTOCOL_OVERHEAD 10u
 #define PROTOCOL_MAX_FRAME (PROTOCOL_MAX_PAYLOAD + PROTOCOL_OVERHEAD)
+#define SENSOR_LOW_MIN_HZ 4000u
+#define SENSOR_LOW_MAX_HZ 600000u
+#define SENSOR_MIN_SLOT_US 250u
+#define SENSOR_SLOT_OVERHEAD_US 40u
+#define SENSOR_PERIODS_PER_SLOT 4u
 #define CONFIG_SIZE 28u
 #define SAMPLE_SIZE 22u
 
@@ -55,6 +60,9 @@ void protocol_feed(protocol_parser_t *parser, const uint8_t *data, size_t length
 void config_decode(test_config_t *config, const uint8_t data[CONFIG_SIZE]);
 void config_encode(uint8_t data[CONFIG_SIZE], const test_config_t *config);
 bool config_valid(const test_config_t *config);
+uint32_t sample_channel_slot_us(uint32_t low_hz);
+uint32_t sample_period_us(uint32_t low_hz);
+uint16_t sample_rate_hz(uint32_t low_hz);
 uint16_t sample_frequency(uint32_t counts, uint32_t clock_hz, uint32_t low_hz,
                           bool *low, bool *clipped);
 #endif

@@ -34,18 +34,20 @@ void sensor_run(void) {
     // This core owns capture; USB backpressure never extends a channel's deadline.
     const uint8_t filter[] = {0, 3, 2, 1}; // R, G, B, Clear: S2 is bit 0.
     const uint32_t clock_hz = clock_get_hz(clk_sys);
-    uint64_t frame_start = time_us_64() + 1000;
+    uint64_t frame_start = time_us_64() + sample_period_us(sensor_low_hz);
     uint32_t sequence = 0;
     bool previous_late = false;
     while (true) {
         busy_wait_until(from_us_since_boot(frame_start));
         sample_t sample = {.sequence = sequence++, .timestamp_us = (uint32_t)frame_start};
         uint32_t low_hz = sensor_low_hz;
+        uint32_t slot_us = sample_channel_slot_us(low_hz);
+        uint32_t period_us = 4u * slot_us;
         if (previous_late || time_us_64() > frame_start + 5)
             sample.flags |= SAMPLE_LATE;
         for (unsigned channel = 0; channel < 4; ++channel) {
-            uint64_t start = frame_start + channel * CHANNEL_SLOT_US;
-            uint64_t cutoff = start + CHANNEL_SLOT_US - 10;
+            uint64_t start = frame_start + channel * slot_us;
+            uint64_t cutoff = start + slot_us - 10;
             busy_wait_until(from_us_since_boot(start));
             if (time_us_64() > start + 5)
                 sample.flags |= SAMPLE_LATE;
@@ -61,7 +63,7 @@ void sensor_run(void) {
             busy_wait_until(from_us_since_boot(cutoff));
             pio_sm_set_enabled(sensor_pio, sensor_sm, false);
             bool low = true, clipped = false;
-            if (time_us_64() > start + CHANNEL_SLOT_US) {
+            if (time_us_64() > start + slot_us) {
                 sample.flags |= SAMPLE_LATE;
             } else if (!pio_sm_is_rx_fifo_empty(sensor_pio, sensor_sm)) {
                 uint32_t counts = pio_sm_get(sensor_pio, sensor_sm);
@@ -75,14 +77,14 @@ void sensor_run(void) {
         ++capture_count;
         if (!queue_try_add(&sample_queue, &sample))
             ++capture_drops;
-        frame_start += 1000;
+        frame_start += period_us;
         uint64_t now = time_us_64();
         previous_late = now > frame_start;
         if (previous_late) {
-            uint32_t skipped = (uint32_t)((now - frame_start) / 1000 + 1);
+            uint32_t skipped = (uint32_t)((now - frame_start) / period_us + 1);
             sequence += skipped;
             capture_drops += skipped;
-            frame_start += (uint64_t)skipped * 1000;
+            frame_start += (uint64_t)skipped * period_us;
         }
     }
 }

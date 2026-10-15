@@ -54,9 +54,10 @@ static void command(uint8_t type, uint16_t sequence, const uint8_t *data, uint16
             result = RESULT_LENGTH;
         } else {
             uint8_t status[32] = {0};
-            wire_put16(status, SAMPLE_RATE_HZ);
-            wire_put16(status + 2, CHANNEL_SLOT_US);
-            wire_put32(status + 4, sensor_low_hz);
+            uint32_t low_hz = sensor_low_hz;
+            wire_put16(status, sample_rate_hz(low_hz));
+            wire_put16(status + 2, (uint16_t)sample_channel_slot_us(low_hz));
+            wire_put32(status + 4, low_hz);
             wire_put32(status + 8, capture_count);
             wire_put32(status + 12, capture_drops);
             wire_put32(status + 16, stream_drops);
@@ -94,7 +95,7 @@ static void command(uint8_t type, uint16_t sequence, const uint8_t *data, uint16
     } else if (type == CMD_LOW) {
         if (length != 4)
             result = RESULT_LENGTH;
-        else if (wire_u32(data) < 10000 || wire_u32(data) > 600000)
+        else if (wire_u32(data) < SENSOR_LOW_MIN_HZ || wire_u32(data) > SENSOR_LOW_MAX_HZ)
             result = RESULT_VALUE;
         else if (app.mode != MODE_MEASURE || app.state != STATE_WAIT)
             result = RESULT_BUSY;

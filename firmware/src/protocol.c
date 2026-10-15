@@ -110,7 +110,7 @@ void config_encode(uint8_t p[CONFIG_SIZE], const test_config_t *c) {
     p[27] = c->mouse_buttons;
 }
 bool config_valid(const test_config_t *c) {
-    if (c->low_hz < 10000 || c->low_hz > 600000 ||
+    if (c->low_hz < SENSOR_LOW_MIN_HZ || c->low_hz > SENSOR_LOW_MAX_HZ ||
         c->exit_threshold <= c->enter_tolerance || !c->arm_ms || c->arm_ms > 60000 ||
         !c->depart_ms || c->depart_ms > 60000 || c->delay_ms > 60000 ||
         !c->hold_ms || c->hold_ms > 60000)
@@ -123,6 +123,18 @@ bool config_valid(const test_config_t *c) {
     if (c->action == ACTION_MOUSE)
         return c->mouse_buttons && c->mouse_buttons <= 31 && !c->keycode && !c->modifiers;
     return false;
+}
+uint32_t sample_channel_slot_us(uint32_t low_hz) {
+    if (low_hz < SENSOR_LOW_MIN_HZ)
+        low_hz = SENSOR_LOW_MIN_HZ;
+    uint32_t slot = (SENSOR_PERIODS_PER_SLOT * 1000000u + low_hz - 1u) / low_hz + SENSOR_SLOT_OVERHEAD_US;
+    return slot < SENSOR_MIN_SLOT_US ? SENSOR_MIN_SLOT_US : slot;
+}
+uint32_t sample_period_us(uint32_t low_hz) {
+    return 4u * sample_channel_slot_us(low_hz);
+}
+uint16_t sample_rate_hz(uint32_t low_hz) {
+    return (uint16_t)(1000000u / sample_period_us(low_hz));
 }
 uint16_t sample_frequency(uint32_t counts, uint32_t clock_hz, uint32_t low_hz,
                           bool *low, bool *clipped) {
