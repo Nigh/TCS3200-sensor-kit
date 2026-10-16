@@ -8,6 +8,7 @@
 #define SENSOR_S0_PIN 3u
 #define SENSOR_S1_PIN 4u
 #define SENSOR_OE_PIN 5u
+extern volatile uint8_t sensor_channels;
 extern queue_t sample_queue;
 extern volatile uint32_t sensor_low_hz, capture_count, capture_drops;
 void sensor_init(void);

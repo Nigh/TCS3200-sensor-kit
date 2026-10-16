@@ -162,3 +162,7 @@ Native components have no shipped HTML/CSS snippets. The sidecar deliberately om
 - **Don't** cover measurements with statistics tooltips or move plot geometry during inspection.
 - **Don't** present synthetic demonstration data as sensor measurements.
 - **Don't** introduce a web styling layer or ornamental animation into this native surface.
+
+### Workspace tabs
+
+The two workspace tabs use native `TabsBase` semantics with equal flex widths and a 36 DIP tab height. The strip has a surface background, 1 DIP border, 8 DIP radius and 4 DIP inset/gap. The selected tab has an accent fill and accent-text label; the inactive tab uses muted text and a border-color hover fill. Each tab has a 5 DIP radius. Keep native tab roles, keyboard selection and focus indicators.

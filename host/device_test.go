@@ -10,17 +10,19 @@ import (
 )
 
 type fakePort struct {
-	rejectLow bool
-	input     chan []byte
-	closed    chan struct{}
-	once      sync.Once
-	mu        sync.Mutex
-	low       uint32
-	silent    bool
+	rejectLow      bool
+	input          chan []byte
+	closed         chan struct{}
+	once           sync.Once
+	mu             sync.Mutex
+	low            uint32
+	channels, mode byte
+	config         []byte
+	silent         bool
 }
 
 func newFake() *fakePort {
-	return &fakePort{input: make(chan []byte, 32), closed: make(chan struct{}), low: 15000}
+	return &fakePort{input: make(chan []byte, 32), closed: make(chan struct{}), low: 15000, channels: 15}
 }
 func (p *fakePort) Read(b []byte) (int, error) {
 	select {
@@ -42,11 +44,26 @@ func (p *fakePort) Write(b []byte) (int, error) {
 	d.feed(b, func(f frame) {
 		if f.kind == cmdStatus {
 			data := make([]byte, 32)
-			rate, slot := maximumRateHz(p.low), channelSlotUS(p.low)
+			data[31] = p.channels
+			data[28] = p.mode
+			rate, slot := maskedRateHz(p.low, p.channels), channelSlotUS(p.low)
 			data[0], data[1] = byte(rate), byte(rate>>8)
 			data[2], data[3] = byte(slot), byte(slot>>8)
 			put32(data[4:], p.low)
 			p.input <- encode(msgStatus, f.sequence, data)
+		} else if f.kind == cmdUSBStatus {
+			p.input <- encode(msgUSBStatus, f.sequence, []byte{0xe8, 3, 0xe8, 3})
+		} else if f.kind == cmdChannels {
+			p.channels = f.payload[0]
+			p.input <- encode(msgACK, f.sequence, []byte{cmdChannels, 0})
+		} else if f.kind == cmdConfig {
+			p.config = append([]byte(nil), f.payload...)
+			p.channels = f.payload[28]
+			p.mode = 0
+			p.input <- encode(msgACK, f.sequence, []byte{cmdConfig, 0})
+		} else if f.kind == cmdMode {
+			p.mode = f.payload[0]
+			p.input <- encode(msgACK, f.sequence, []byte{cmdMode, 0})
 		} else if f.kind == cmdLow {
 			if p.rejectLow {
 				p.input <- encode(msgACK, f.sequence, []byte{cmdLow, 4})

@@ -1,0 +1,156 @@
+package main
+
+import (
+	"encoding/binary"
+	"fmt"
+	"math"
+	"strconv"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
+
+func triggerConfig(low uint32, mask byte, reference uint16, enter, exit uint16, delay uint32) ([]byte, bool) {
+	if mask == 0 || mask > 15 || mask&(mask-1) != 0 || exit <= enter || delay > 1000 || reference == 65535 || low < lowMinHz || low > lowMaxHz {
+		return nil, false
+	}
+	p := make([]byte, 30)
+	binary.LittleEndian.PutUint32(p, low)
+	binary.LittleEndian.PutUint16(p[4:], reference)
+	binary.LittleEndian.PutUint16(p[10:], enter)
+	binary.LittleEndian.PutUint16(p[12:], exit)
+	// One valid sample confirms ARM/departure; no additional debounce latency.
+	binary.LittleEndian.PutUint32(p[18:], delay)
+	binary.LittleEndian.PutUint16(p[22:], 1)
+	p[24], p[27], p[28] = 2, 1, mask
+	for mask>>p[29] != 1 {
+		p[29]++
+	}
+	return p, true
+}
+func (s *app) testView(c *ui.Context, status deviceStatus, ready bool) {
+	b := s.backend
+	active := status.mode != 0 || status.state != 0
+	one := status.channels != 0 && status.channels&(status.channels-1) == 0
+	ch := byte(0)
+	if one {
+		for status.channels>>ch != 1 {
+			ch++
+		}
+	}
+	if s.referenceChannel != status.channels || s.referenceLow != status.low {
+		s.referenceValid = false
+	}
+	ui.Column(c).Grow(1).Gap(16).Children(func() {
+		ui.Text(c, "自动触发测试").FontSize(20).Bold()
+		ui.Text(c, "仅支持单通道：对准 ARM 颜色 → Set ARM Color → Test → 等待颜色偏离 → MCU 延时后左键点击；连续测试会重新等待 ARM 颜色").TextColor(s.theme.TextMuted)
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			if ui.Button(c, "Set ARM Color").Tooltip("使用最近 500 ms 的平均值和最大最小值自动标定；保留噪声余量和迟滞间隔，数值可手动微调").Disabled(!ready || !one || active).Clicked() {
+				b.mu.Lock()
+				s.referenceValid = false
+				b.message = "无法保存 ARM 颜色：请等待当前通道的有效新样本（非 CLIP/LATE）"
+				b.dirty = true
+				if b.history.size > 0 && time.Since(b.lastSample) < 200*time.Millisecond {
+					s.live = b.history.copyTo(s.live)
+					last := s.live[len(s.live)-1]
+					mean, low, high, n := recentStats(s.live, int(ch))
+					reference, enter, exit, valid := autoArmThresholds(mean, low, high)
+					if last.channels == status.channels && last.clip&(1<<ch) == 0 && last.flags == 0 &&
+						last.micros-s.live[0].micros >= 500000 && n >= 2 && valid {
+						s.reference, s.referenceValid = reference, true
+						s.referenceChannel, s.referenceLow = status.channels, status.low
+						s.enterInput = strconv.FormatUint(uint64(enter), 10)
+						s.exitInput = strconv.FormatUint(uint64(exit), 10)
+						b.message = "ARM 已按最近 500 ms 自动标定；容差与偏离阈值留有迟滞间隔，可手动微调"
+					} else {
+						b.message = "无法标定：请保持 ARM 颜色稳定，等待至少 500 ms 有效采样后重试"
+					}
+				}
+				b.mu.Unlock()
+			}
+			reference := "尚未保存 ARM 颜色"
+			if s.referenceValid {
+				reference = fmt.Sprintf("ARM 基准 %.2f kHz", float64(s.reference)/100)
+			}
+			ui.Text(c, reference)
+		})
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "ARM 容差 / 10 Hz")
+			ui.TextInput(c, &s.enterInput).Width(80).Label("ARM 容差，单位 10 Hz").Disabled(active)
+			ui.Text(c, "偏离阈值 / 10 Hz")
+			ui.TextInput(c, &s.exitInput).Width(80).Label("偏离阈值，单位 10 Hz").Disabled(active)
+			ui.Text(c, "Delay / ms")
+			ui.TextInput(c, &s.delayInput).Width(80).Label("延时，0 到 1000 ms").Disabled(active)
+		})
+		enter, e1 := strconv.ParseUint(s.enterInput, 10, 16)
+		exit, e2 := strconv.ParseUint(s.exitInput, 10, 16)
+		delay, e3 := strconv.ParseUint(s.delayInput, 10, 32)
+		config, valid := triggerConfig(status.low, status.channels, s.reference, uint16(enter), uint16(exit), uint32(delay))
+		valid = valid && e1 == nil && e2 == nil && e3 == nil
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			label := "Test"
+			if status.mode == 1 {
+				label = "取消 Test"
+			}
+			if ui.PrimaryButton(c, label).Disabled(!ready || active && status.mode != 1 || !active && (!valid || !s.referenceValid)).Clicked() {
+				mode := byte(1)
+				if active {
+					mode = 0
+				}
+				b.test(config, mode)
+			}
+			continuous := "连续测试"
+			if status.mode == 2 {
+				continuous = "停止连续测试"
+			}
+			if ui.Button(c, continuous).Disabled(!ready || active && status.mode != 2 || !active && (!valid || !s.referenceValid)).Clicked() {
+				mode := byte(2)
+				if active {
+					mode = 0
+				}
+				b.test(config, mode)
+			}
+			states := []string{"等待 ARM 颜色", "Armed · 等待颜色偏离", "Delay · MCU 延时中", "发送左键按下", "左键按住", "释放左键"}
+			text := "就绪 · 每次 Test 只点击一次"
+			if active && int(status.state) < len(states) {
+				text = states[status.state]
+				if status.mode == 2 {
+					text = "连续测试 · " + text
+				}
+			}
+			ui.Text(c, text).TextColor(s.theme.Accent)
+		})
+		if !one {
+			ui.Text(c, "请只开启一个采集通道；允许全部关闭，但无法开始测试").TextColor(s.theme.Warning)
+		}
+		if !valid && one {
+			ui.Text(c, "偏离阈值必须大于 ARM 容差；Delay 为 0–1000 ms 整数").TextColor(s.theme.Warning)
+		}
+		ui.Text(c, "最近 500 ms · 有效样本统计 / kHz").Bold()
+		for channel, name := range []string{"R", "G", "B", "Clear"} {
+			if status.channels&(1<<channel) == 0 {
+				continue
+			}
+			mean, low, high, n := recentStats(s.live, channel)
+			text := name + " · 等待有效采样"
+			if n > 0 {
+				text = fmt.Sprintf("%s    平均 %.2f    最大 %.2f    最小 %.2f    峰峰值 %.2f    n=%d", name, mean, high, low, high-low, n)
+			}
+			ui.Text(c, text).FontSize(18)
+		}
+	})
+}
+
+// Use the observed envelope plus noise headroom, with a separate hysteresis gap.
+func autoArmThresholds(mean, low, high float64) (reference, enter, exit uint16, valid bool) {
+	ref := uint32(math.Round(mean * 100))
+	minimum, maximum := uint32(math.Round(low*100)), uint32(math.Round(high*100))
+	spread := max(ref-minimum, maximum-ref)
+	margin := max(uint32(2), (spread+3)/4, (ref+199)/200)
+	tolerance := spread + margin
+	threshold := tolerance + max(spread, 2*margin)
+	if ref > 65534 || threshold > max(ref, 65534-ref) {
+		return 0, 0, 0, false
+	}
+	return uint16(ref), uint16(tolerance), uint16(threshold), true
+}

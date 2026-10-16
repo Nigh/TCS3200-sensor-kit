@@ -55,7 +55,7 @@ static void command(uint8_t type, uint16_t sequence, const uint8_t *data, uint16
         } else {
             uint8_t status[32] = {0};
             uint32_t low_hz = sensor_low_hz;
-            wire_put16(status, sample_rate_hz(low_hz));
+            wire_put16(status, sample_mask_rate_hz(low_hz, sensor_channels));
             wire_put16(status + 2, (uint16_t)sample_channel_slot_us(low_hz));
             wire_put32(status + 4, low_hz);
             wire_put32(status + 8, capture_count);
@@ -66,7 +66,18 @@ static void command(uint8_t type, uint16_t sequence, const uint8_t *data, uint16
             status[28] = app.mode;
             status[29] = app.state;
             status[30] = app.configured;
+            status[31] = sensor_channels;
             send_frame(MSG_STATUS, sequence, status, sizeof(status));
+            return;
+        }
+    } else if (type == CMD_USB_STATUS) {
+        if (length) {
+            result = RESULT_LENGTH;
+        } else {
+            uint8_t status[4];
+            wire_put16(status, HID_INTERVAL_MS * 1000u);
+            wire_put16(status + 2, usb_poll_rate());
+            send_frame(MSG_USB_STATUS, sequence, status, sizeof(status));
             return;
         }
     } else if (type == CMD_MODE) {
@@ -79,8 +90,10 @@ static void command(uint8_t type, uint16_t sequence, const uint8_t *data, uint16
             config_decode(&config, data);
             if (!app_configure(&app, &config))
                 result = RESULT_VALUE;
-            else
+            else {
                 sensor_low_hz = config.low_hz;
+                sensor_channels = config.channels;
+            }
         }
     } else if (type == CMD_GET_CONFIG) {
         if (length) {
@@ -91,6 +104,17 @@ static void command(uint8_t type, uint16_t sequence, const uint8_t *data, uint16
             config_encode(config + 1, &app.config);
             send_frame(MSG_CONFIG, sequence, config, sizeof(config));
             return;
+        }
+    } else if (type == CMD_CHANNELS) {
+        if (length != 1)
+            result = RESULT_LENGTH;
+        else if (data[0] > 15)
+            result = RESULT_VALUE;
+        else if (app.mode != MODE_MEASURE || app.state != STATE_WAIT)
+            result = RESULT_BUSY;
+        else {
+            sensor_channels = data[0];
+            app.configured = false;
         }
     } else if (type == CMD_LOW) {
         if (length != 4)
@@ -142,8 +166,10 @@ static void hid_task(void) {
         if (sent)
             mouse_report = report;
     }
-    if (sent)
+    if (sent) {
+        usb_poll_reset();
         app_hid_submitted(&app);
+    }
 }
 void usb_init(void) {
     app_init(&app);
@@ -160,6 +186,8 @@ void usb_task(void) {
         tud_cdc_read_flush();
     }
     was_connected = live;
+    usb_poll_task(live && tud_hid_ready() && !app.in_flight);
+    hid_task();
     drain();
     // One byte at a time reserves room for every command reply without blocking.
     for (unsigned i = 0; live && i < 128 && tud_cdc_available() && tx_free() >= PROTOCOL_MAX_FRAME; ++i) {
@@ -174,6 +202,7 @@ void usb_task(void) {
 }
 void usb_sample(const sample_t *s) {
     app_sample(&app, s);
+    hid_task();
     if (!connected() || boot_pending)
         return;
     // Leave a complete maximum-sized reply slot even when streaming is congested.
@@ -191,9 +220,11 @@ void usb_sample(const sample_t *s) {
     payload[18] = app.mode;
     payload[19] = app.state;
     payload[20] = s->flags;
+    payload[21] = s->channels;
     send_frame(MSG_SAMPLE, (uint16_t)s->sequence, payload, sizeof(payload));
 }
 static void disconnected(void) {
+    usb_poll_reset();
     app_disconnect(&app);
     memset(&keyboard_report, 0, sizeof(keyboard_report));
     memset(&mouse_report, 0, sizeof(mouse_report));

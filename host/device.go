@@ -64,6 +64,9 @@ func (c *connection) request(kind byte, payload []byte) (frame, error) {
 	if kind == cmdStatus {
 		expected = msgStatus
 	}
+	if kind == cmdUSBStatus {
+		expected = msgUSBStatus
+	}
 	for {
 		select {
 		case <-c.done:
@@ -92,6 +95,7 @@ func (c *connection) request(kind byte, payload []byte) (frame, error) {
 
 type backend struct {
 	sampleDirty                   bool
+	lastSample                    time.Time
 	resetID                       uint64
 	mu                            sync.Mutex
 	devices                       []device
@@ -100,6 +104,7 @@ type backend struct {
 	conn                          *connection
 	generation                    uint64
 	status                        deviceStatus
+	usb                           usbStatus
 	history                       history
 	parserErrors                  uint64
 	discardUntil                  uint64
@@ -201,6 +206,7 @@ func (b *backend) connect(path string) {
 		b.parserErrors = 0
 		b.discardUntil = 0
 		b.status = deviceStatus{}
+		b.usb = usbStatus{}
 		b.mu.Unlock()
 		go b.receive(c)
 		status, err := b.getStatus(c)
@@ -245,8 +251,26 @@ func (b *backend) getStatus(c *connection) (deviceStatus, error) {
 	}
 	s, ok := decodeStatus(f.payload)
 	if !ok {
-		return s, errors.New("设备状态或采样率与协议 v2 不兼容")
+		return s, errors.New("设备状态或采样率与协议 v3 不兼容")
 	}
+
+	uf, err := c.request(cmdUSBStatus, nil)
+	var rejected commandRejected
+	if errors.As(err, &rejected) && rejected == 5 {
+		return s, nil
+	}
+	if err != nil {
+		return s, err
+	}
+	usb, ok := decodeUSBStatus(uf.payload)
+	if !ok {
+		return s, errors.New("USB 轮询状态格式错误")
+	}
+	b.mu.Lock()
+	if b.conn == c {
+		b.usb = usb
+	}
+	b.mu.Unlock()
 	return s, nil
 }
 func (b *backend) receive(c *connection) {
@@ -276,10 +300,12 @@ func (b *backend) receive(c *connection) {
 							}
 						}
 						b.parserErrors = d.errors
+						b.status.mode, b.status.state = s.mode, s.state
+						b.lastSample = time.Now()
 						b.sampleDirty = true
 					}
 					b.mu.Unlock()
-				} else if f.kind == msgACK || f.kind == msgStatus {
+				} else if f.kind == msgACK || f.kind == msgStatus || f.kind == msgUSBStatus {
 					select {
 					case c.replies <- f:
 					default:
@@ -388,4 +414,59 @@ func (b *backend) setLow(value uint32) {
 		b.message = "阈值已更新；已有测试配置失效，等待新采样"
 		b.dirty = true
 	}()
+}
+
+// Serialize UI mutations, and always read back device state before enabling controls.
+func (b *backend) mutate(run func(*connection) error) {
+	b.mu.Lock()
+	c := b.conn
+	if c == nil || b.state != "已连接" || b.adjusting {
+		b.mu.Unlock()
+		return
+	}
+	b.adjusting, b.dirty = true, true
+	b.mu.Unlock()
+	go func() {
+		if err := run(c); err != nil {
+			var rejected commandRejected
+			if !errors.As(err, &rejected) {
+				b.fail(c, err)
+				return
+			}
+			b.mu.Lock()
+			if b.conn == c {
+				b.message = err.Error()
+				b.adjusting, b.dirty = false, true
+			}
+			b.mu.Unlock()
+			return
+		}
+		status, err := b.getStatus(c)
+		if err != nil {
+			b.fail(c, err)
+			return
+		}
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if b.conn == c {
+			b.status = status
+			b.adjusting, b.dirty = false, true
+		}
+	}()
+}
+func (b *backend) setChannels(mask byte) {
+	b.mutate(func(c *connection) error { _, err := c.request(cmdChannels, []byte{mask}); return err })
+}
+func (b *backend) test(config []byte, mode byte) {
+	b.mutate(func(c *connection) error {
+		if mode == 0 {
+			_, err := c.request(cmdMode, []byte{0})
+			return err
+		}
+		if _, err := c.request(cmdConfig, config); err != nil {
+			return err
+		}
+		_, err := c.request(cmdMode, []byte{mode})
+		return err
+	})
 }

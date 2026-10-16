@@ -17,7 +17,7 @@ func TestProtocolVectors(t *testing.T) {
 	if crc16([]byte("123456789")) != 0x29b1 {
 		t.Fatal("CRC")
 	}
-	vectors := [][]byte{unhex("5443020101000000b559"), unhex("544302020200010000de69"), unhex("544302800200020002002b15"), unhex("5443020603000400983a0000d7ea"), unhex("544302400000160000000000a086010000000000000000000f000000000068f3")}
+	vectors := [][]byte{unhex("5443030101000000151c"), unhex("544303020200010000bfd1"), unhex("54430380020002000200f852"), unhex("5443030603000400983a00009285"), unhex("544303400000160000000000a086010000000000000000000f000000000f1326")}
 	for _, v := range vectors {
 		for split := 0; split <= len(v); split++ {
 			var d decoder
@@ -48,7 +48,7 @@ func TestProtocolVectors(t *testing.T) {
 }
 func TestSampleVector(t *testing.T) {
 	var d decoder
-	d.feed(unhex("544302400000160000000000a086010000000000000000000f000000000068f3"), func(f frame) {
+	d.feed(unhex("544303400000160000000000a086010000000000000000000f000000000f1326"), func(f frame) {
 		s, ok := decodeSample(f)
 		if !ok || s.micros != 100000 || s.low != 15 {
 			t.Fatal(s, ok)
@@ -69,5 +69,24 @@ func TestInvalidHeaderAndMalformedSample(t *testing.T) {
 	}
 	if _, ok := decodeSample(frame{kind: msgSample, sequence: 1, payload: make([]byte, 22)}); ok {
 		t.Fatal("sequence mismatch")
+	}
+}
+
+func TestUSBPollStatus(t *testing.T) {
+	for _, hz := range []uint16{0, 125, 500, 1000, 65535} {
+		p := []byte{0xe8, 3, byte(hz), byte(hz >> 8)}
+		s, ok := decodeUSBStatus(p)
+		if !ok || s.idlePollHz != hz || s.intervalUS != 1000 {
+			t.Fatal(s, ok)
+		}
+	}
+	if _, ok := decodeUSBStatus([]byte{1, 0, 0, 0}); ok {
+		t.Fatal("invalid interval")
+	}
+	if _, ok := decodeUSBStatus([]byte{0}); ok {
+		t.Fatal("short status")
+	}
+	if (usbStatus{1000, 65535}).text() != "HID 请求 1000 Hz · 空闲轮询估算：暂不可测" {
+		t.Fatal("unavailable status")
 	}
 }

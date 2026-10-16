@@ -16,6 +16,7 @@ func TestSamplingSchedule(t *testing.T) {
 			t.Fatalf("%d: slot=%d rate=%d", tt.low, slot, rate)
 		}
 		p := make([]byte, 32)
+		p[31] = 15
 		binary.LittleEndian.PutUint16(p, tt.rate)
 		binary.LittleEndian.PutUint16(p[2:], uint16(tt.slot))
 		binary.LittleEndian.PutUint32(p[4:], tt.low)

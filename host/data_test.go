@@ -9,7 +9,7 @@ import (
 func TestHistory(t *testing.T) {
 	var h history
 	for i := range 20000 {
-		h.add(sample{sequence: uint32(i), micros: uint64(uint32(0xffff0000 + uint64(i)*1000))})
+		h.add(sample{channels: 15, sequence: uint32(i), micros: uint64(uint32(0xffff0000 + uint64(i)*1000))})
 	}
 	data := h.copyTo(nil)
 	if len(data) != 10001 || data[len(data)-1].micros-data[0].micros != windowUS {
@@ -17,14 +17,14 @@ func TestHistory(t *testing.T) {
 	}
 	snapshot := slices.Clone(data)
 	next := uint64(0xffff0000 + 20002*1000)
-	h.add(sample{sequence: 20002, micros: uint64(uint32(next))})
+	h.add(sample{channels: 15, sequence: 20002, micros: uint64(uint32(next))})
 	if h.drops != 2 || !slices.Equal(snapshot, data) {
 		t.Fatal("drop/freeze")
 	}
-	if h.add(sample{sequence: 20002, micros: h.elapsed}) {
+	if h.add(sample{channels: 15, sequence: 20002, micros: h.elapsed}) {
 		t.Fatal("duplicate")
 	}
-	h.add(sample{sequence: 1, micros: 1000})
+	h.add(sample{channels: 15, sequence: 1, micros: 1000})
 	if h.size != 1 {
 		t.Fatal("reset")
 	}
@@ -43,7 +43,7 @@ func TestMinmaxAndStats(t *testing.T) {
 	if !gap {
 		t.Fatal("gap lost")
 	}
-	data := []sample{{micros: 1, values: [4]uint16{100}}, {micros: 2, values: [4]uint16{400}}, {micros: 3, values: [4]uint16{200}}, {micros: 4, values: [4]uint16{300}}}
+	data := []sample{{channels: 15, micros: 1, values: [4]uint16{100}}, {channels: 15, micros: 2, values: [4]uint16{400}}, {channels: 15, micros: 3, values: [4]uint16{200}}, {channels: 15, micros: 4, values: [4]uint16{300}}}
 	s, _ := bucketStats(data, 0, 1, 5, nil)
 	if s.count != 4 || s.min != 1 || s.max != 4 || s.median != 2.5 {
 		t.Fatal(s)
@@ -61,9 +61,9 @@ func TestMinmaxAndStats(t *testing.T) {
 func TestThreeMinutesOfSamplesStayBounded(t *testing.T) {
 	var h history
 	for i := range 180000 {
-		h.add(sample{sequence: uint32(i), micros: uint64(i) * 1000})
+		h.add(sample{channels: 15, sequence: uint32(i), micros: uint64(i) * 1000})
 	}
-	if h.size != capacity || h.drops != 0 {
+	if h.size != 10001 || h.drops != 0 {
 		t.Fatal(h.size, h.drops)
 	}
 	data := h.copyTo(nil)
@@ -88,9 +88,9 @@ func BenchmarkMinMax(b *testing.B) {
 
 func TestSequenceWrap(t *testing.T) {
 	var h history
-	h.add(sample{sequence: 0xfffffffe, micros: 1000})
-	h.add(sample{sequence: 0xffffffff, micros: 2000})
-	h.add(sample{sequence: 0, micros: 3000})
+	h.add(sample{channels: 15, sequence: 0xfffffffe, micros: 1000})
+	h.add(sample{channels: 15, sequence: 0xffffffff, micros: 2000})
+	h.add(sample{channels: 15, sequence: 0, micros: 3000})
 	if h.size != 3 || h.drops != 0 {
 		t.Fatal(h.size, h.drops)
 	}

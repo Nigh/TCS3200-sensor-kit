@@ -28,7 +28,7 @@ test:
 		tests/test_core.c src/protocol.c src/app.c -o $(BUILD_DIR)/tests/test_core
 	$(BUILD_DIR)/tests/test_core
 	$(CC) -std=c11 -Wall -Wextra -Werror -pedantic -g -fsanitize=address,undefined -Itests/stubs -Isrc \
-		tests/test_usb.c src/usb_func.c src/protocol.c src/app.c -o $(BUILD_DIR)/tests/test_usb
+		tests/test_usb.c src/usb_func.c src/usb_poll.c src/protocol.c src/app.c -o $(BUILD_DIR)/tests/test_usb
 	$(BUILD_DIR)/tests/test_usb
 	python3 tests/test_pio.py
 	python3 tests/test_vectors.py

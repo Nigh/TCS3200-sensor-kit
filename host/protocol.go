@@ -1,13 +1,21 @@
 package main
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 const (
-	cmdStatus = 0x01
-	cmdLow    = 0x06
-	msgSample = 0x40
-	msgACK    = 0x80
-	msgStatus = 0x81
+	cmdStatus    = 0x01
+	cmdLow       = 0x06
+	cmdChannels  = 0x07
+	cmdUSBStatus = 0x08
+	msgUSBStatus = 0x88
+	cmdMode      = 0x02
+	cmdConfig    = 0x03
+	msgSample    = 0x40
+	msgACK       = 0x80
+	msgStatus    = 0x81
 )
 
 type frame struct {
@@ -83,10 +91,10 @@ func (d *decoder) feed(data []byte, accept func(frame)) {
 }
 
 type sample struct {
-	sequence                      uint32
-	micros                        uint64
-	values                        [4]uint16
-	low, clip, mode, state, flags byte
+	sequence                                uint32
+	micros                                  uint64
+	values                                  [4]uint16
+	low, clip, mode, state, flags, channels byte
 }
 
 func decodeSample(f frame) (sample, bool) {
@@ -94,27 +102,46 @@ func decodeSample(f frame) (sample, bool) {
 		return sample{}, false
 	}
 	p := f.payload
-	s := sample{sequence: binary.LittleEndian.Uint32(p), micros: uint64(binary.LittleEndian.Uint32(p[4:])), low: p[16], clip: p[17], mode: p[18], state: p[19], flags: p[20]}
+	s := sample{sequence: binary.LittleEndian.Uint32(p), micros: uint64(binary.LittleEndian.Uint32(p[4:])), low: p[16], clip: p[17], mode: p[18], state: p[19], flags: p[20], channels: p[21]}
 	for i := range 4 {
 		s.values[i] = binary.LittleEndian.Uint16(p[8+i*2:])
 	}
-	return s, f.sequence == uint16(s.sequence) && s.mode <= 1 && s.state <= 5 && s.low&0xf0 == 0 && s.clip&0xf0 == 0 && s.flags&^byte(1) == 0 && p[21] == 0
+	return s, f.sequence == uint16(s.sequence) && s.mode <= 2 && s.state <= 5 && s.low&0xf0 == 0 && s.clip&0xf0 == 0 && s.flags&^byte(1) == 0 && p[21] <= 15
 }
 
 type deviceStatus struct {
 	rate, slot                                                    uint16
 	low, capture, captureDrops, streamDrops, parserErrors, uptime uint32
-	mode, state, configured                                       byte
+	mode, state, configured, channels                             byte
 }
 
 func decodeStatus(p []byte) (deviceStatus, bool) {
 	if len(p) != 32 {
 		return deviceStatus{}, false
 	}
-	s := deviceStatus{rate: binary.LittleEndian.Uint16(p), slot: binary.LittleEndian.Uint16(p[2:]), mode: p[28], state: p[29], configured: p[30]}
+	s := deviceStatus{rate: binary.LittleEndian.Uint16(p), slot: binary.LittleEndian.Uint16(p[2:]), mode: p[28], state: p[29], configured: p[30], channels: p[31]}
 	fields := []*uint32{&s.low, &s.capture, &s.captureDrops, &s.streamDrops, &s.parserErrors, &s.uptime}
 	for i, dst := range fields {
 		*dst = binary.LittleEndian.Uint32(p[4+4*i:])
 	}
-	return s, s.low >= lowMinHz && s.low <= lowMaxHz && s.rate == maximumRateHz(s.low) && uint32(s.slot) == channelSlotUS(s.low) && s.mode <= 1 && s.state <= 5 && s.configured <= 1 && p[31] == 0
+	return s, s.low >= lowMinHz && s.low <= lowMaxHz && s.rate == maskedRateHz(s.low, s.channels) && uint32(s.slot) == channelSlotUS(s.low) && s.mode <= 2 && s.state <= 5 && s.configured <= 1 && p[31] <= 15
+}
+
+type usbStatus struct{ intervalUS, idlePollHz uint16 }
+
+func decodeUSBStatus(p []byte) (usbStatus, bool) {
+	if len(p) != 4 {
+		return usbStatus{}, false
+	}
+	s := usbStatus{binary.LittleEndian.Uint16(p), binary.LittleEndian.Uint16(p[2:])}
+	return s, s.intervalUS == 1000
+}
+func (s usbStatus) text() string {
+	if s.intervalUS == 0 {
+		return "HID 轮询：—"
+	}
+	if s.idlePollHz == 65535 {
+		return "HID 请求 1000 Hz · 空闲轮询估算：暂不可测"
+	}
+	return fmt.Sprintf("HID 请求 1000 Hz · 空闲轮询估算 %d Hz", s.idlePollHz)
 }

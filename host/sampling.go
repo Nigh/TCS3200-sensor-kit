@@ -10,10 +10,10 @@ const (
 	lowMinHz        = uint32(4000)
 	lowMaxHz        = uint32(600000)
 	defaultLowHz    = uint32(15000)
-	protocolVersion = byte(2)
+	protocolVersion = byte(3)
 )
 
-// Keep the timing budget in sync with firmware/src/protocol.c and protocol v2.
+// Keep the timing budget in sync with firmware/src/protocol.c and protocol v3.
 func channelSlotUS(low uint32) uint32 {
 	low = max(lowMinHz, min(lowMaxHz, low))
 	return max(250, (4_000_000+low-1)/low+40)
@@ -30,4 +30,15 @@ func clampedLowInput(text string, fallback uint32) uint32 {
 		return fallback
 	}
 	return uint32(math.Round(max(float64(lowMinHz), min(float64(lowMaxHz), value))))
+}
+
+func maskedRateHz(low uint32, mask byte) uint16 {
+	count := uint32(0)
+	for ch := range 4 {
+		count += uint32(mask >> ch & 1)
+	}
+	if count == 0 {
+		return 0
+	}
+	return uint16(1_000_000 / (count * channelSlotUS(low)))
 }

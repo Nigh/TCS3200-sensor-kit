@@ -106,7 +106,7 @@ uint8_t const desc_fs_configuration[] = {
 	TUD_HID_DESCRIPTOR(ITF_NUM_HID, 0,
 							 HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report),
 							 0x80 | EPNUM_HID,
-							 CFG_TUD_HID_EP_BUFSIZE, 1),
+							 CFG_TUD_HID_EP_BUFSIZE, HID_INTERVAL_MS),
 	// 1st CDC: Interface number, string index, EP notification address and
 	// size, EP data address (out, in) and size.
 	TUD_CDC_DESCRIPTOR(ITF_NUM_CDC_0, 4,

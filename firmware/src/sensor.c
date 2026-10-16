@@ -5,6 +5,7 @@
 #include "pico/stdlib.h"
 
 queue_t sample_queue;
+volatile uint8_t sensor_channels = 15;
 volatile uint32_t sensor_low_hz = 15000, capture_count, capture_drops;
 static PIO sensor_pio = pio0;
 static uint sensor_sm, program_offset;
@@ -42,11 +43,16 @@ void sensor_run(void) {
         sample_t sample = {.sequence = sequence++, .timestamp_us = (uint32_t)frame_start};
         uint32_t low_hz = sensor_low_hz;
         uint32_t slot_us = sample_channel_slot_us(low_hz);
-        uint32_t period_us = 4u * slot_us;
+        uint8_t channels = sensor_channels;
+        sample.channels = channels;
+        uint32_t period_us = sample_mask_period_us(low_hz, channels);
+        unsigned slot = 0;
         if (previous_late || time_us_64() > frame_start + 5)
             sample.flags |= SAMPLE_LATE;
         for (unsigned channel = 0; channel < 4; ++channel) {
-            uint64_t start = frame_start + channel * slot_us;
+            if (!(channels & (1u << channel)))
+                continue;
+            uint64_t start = frame_start + slot++ * slot_us;
             uint64_t cutoff = start + slot_us - 10;
             busy_wait_until(from_us_since_boot(start));
             if (time_us_64() > start + 5)
@@ -74,6 +80,7 @@ void sensor_run(void) {
             if (clipped)
                 sample.clip_mask |= (uint8_t)(1u << channel);
         }
+        sample.detected_us = time_us_32();
         ++capture_count;
         if (!queue_try_add(&sample_queue, &sample))
             ++capture_drops;

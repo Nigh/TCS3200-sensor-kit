@@ -5,7 +5,7 @@ import (
 	"slices"
 )
 
-const capacity = 10001
+const capacity = 40001
 const windowUS = uint64(10_000_000)
 
 type history struct {
@@ -66,7 +66,7 @@ type statistics struct {
 func bucketStats(data []sample, ch int, lo, hi float64, scratch []uint16) (statistics, []uint16) {
 	scratch = scratch[:0]
 	for _, s := range data {
-		if float64(s.micros) >= lo && float64(s.micros) < hi {
+		if s.channels&(1<<ch) != 0 && float64(s.micros) >= lo && float64(s.micros) < hi {
 			scratch = append(scratch, s.values[ch])
 		}
 	}
@@ -127,4 +127,28 @@ func minmax(dstX, dstY, xs, ys []float32, width int) ([]float32, []float32) {
 		start = end
 	}
 	return dstX, dstY
+}
+
+// Recent statistics use only valid measurements of enabled channels.
+func recentStats(data []sample, ch int) (mean, low, high float64, count int) {
+	if len(data) == 0 {
+		return
+	}
+	end := data[len(data)-1].micros
+	for _, s := range data {
+		if end-s.micros > 500000 || s.channels&(1<<ch) == 0 || s.clip&(1<<ch) != 0 || s.flags != 0 {
+			continue
+		}
+		v := float64(s.values[ch]) / 100
+		if count == 0 {
+			low, high = v, v
+		}
+		low, high = min(low, v), max(high, v)
+		mean += v
+		count++
+	}
+	if count > 0 {
+		mean /= float64(count)
+	}
+	return
 }

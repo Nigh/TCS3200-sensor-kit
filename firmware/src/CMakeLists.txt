@@ -1,5 +1,5 @@
 add_executable(tcs3200_sensor
-    main.c sensor.c app.c protocol.c usb_func.c usb_descriptors.c)
+    main.c sensor.c app.c protocol.c usb_func.c usb_poll.c usb_descriptors.c)
 target_include_directories(tcs3200_sensor PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 pico_generate_pio_header(tcs3200_sensor ${CMAKE_CURRENT_LIST_DIR}/period.pio)
 target_link_libraries(tcs3200_sensor PRIVATE
