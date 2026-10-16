@@ -8,11 +8,11 @@ document = (Path(__file__).resolve().parents[2] / "docs/protocol.md").read_text(
 vectors = [bytes.fromhex(line) for line in re.findall(r"^54 43(?: [0-9a-f]{2})+$", document, re.M)]
 assert len(vectors) == 5
 for frame in vectors:
-    assert frame[2] == 1
+    assert frame[2] == 2
     length = int.from_bytes(frame[6:8], "little")
     assert len(frame) == length + 10
     assert binascii.crc_hqx(frame[2:-2], 0xFFFF) == int.from_bytes(frame[-2:], "little")
-assert vectors[0][2:8] == struct.pack("<BBHH", 1, 1, 1, 0)
+assert vectors[0][2:8] == struct.pack("<BBHH", 2, 1, 1, 0)
 assert vectors[1][8:-2] == b"\0"
 assert vectors[2][8:-2] == b"\2\0"
 assert vectors[3][8:-2] == struct.pack("<I", 15000)

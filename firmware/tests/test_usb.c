@@ -105,20 +105,36 @@ int main(void) {
     collect();
     assert(last_type == MSG_STATUS && last_length == 32);
     assert(wire_u32(last_payload + 8) == 123 && wire_u32(last_payload + 12) == 4);
+    wire_put32(low, 4000);
+    request(CMD_LOW, low, 4);
+    collect();
+    assert(sensor_low_hz == 4000 && last_payload[1] == RESULT_OK);
+    request(CMD_STATUS, NULL, 0);
+    collect();
+    assert(wire_u16(last_payload) == 240 && wire_u16(last_payload + 2) == 1040);
+    assert(wire_u32(last_payload + 4) == 4000);
+    wire_put32(low, 3999);
+    request(CMD_LOW, low, 4);
+    collect();
+    assert(sensor_low_hz == 4000 && last_payload[1] == RESULT_VALUE);
+    wire_put32(low, 600001);
+    request(CMD_LOW, low, 4);
+    collect();
+    assert(sensor_low_hz == 4000 && last_payload[1] == RESULT_VALUE);
     request(CMD_MODE, NULL, 0);
     collect();
     assert(last_type == MSG_ACK && last_payload[1] == RESULT_LENGTH);
     request(0x7f, NULL, 0);
     collect();
     assert(last_payload[1] == RESULT_UNKNOWN);
-    test_config_t c = {.low_hz = 15000, .reference = {2000, 3000, 4000},
+    test_config_t c = {.low_hz = 20000, .reference = {2000, 3000, 4000},
         .enter_tolerance = 10, .exit_threshold = 30, .arm_ms = 1, .depart_ms = 1,
         .hold_ms = 3, .action = ACTION_MOUSE, .mouse_buttons = 1};
     uint8_t config[CONFIG_SIZE];
     config_encode(config, &c);
     request(CMD_CONFIG, config, sizeof(config));
     collect();
-    assert(last_payload[1] == RESULT_OK && sensor_low_hz == 15000);
+    assert(last_payload[1] == RESULT_OK && sensor_low_hz == 20000);
     request(CMD_GET_CONFIG, NULL, 0);
     collect();
     assert(last_type == MSG_CONFIG && last_payload[0] == 1 &&

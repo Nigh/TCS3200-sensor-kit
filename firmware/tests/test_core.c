@@ -17,7 +17,7 @@ static void receive(uint8_t type, uint16_t sequence, const uint8_t *payload,
 static void test_protocol(void) {
     assert(protocol_crc((const uint8_t *)"123456789", 9) == 0x29b1);
     uint8_t frame[PROTOCOL_MAX_FRAME];
-    const uint8_t status_vector[] = {0x54, 0x43, 1, 1, 1, 0, 0, 0, 0x55, 0x97};
+    const uint8_t status_vector[] = {0x54, 0x43, 2, 1, 1, 0, 0, 0, 0xb5, 0x59};
     assert(protocol_encode(frame, CMD_STATUS, 1, NULL, 0) == sizeof(status_vector));
     assert(!memcmp(frame, status_vector, sizeof(status_vector)));
     protocol_parser_t p = {0};
@@ -65,7 +65,7 @@ static void test_protocol(void) {
     }
 }
 static test_config_t config(void) {
-    return (test_config_t){.low_hz = 15000, .reference = {2000, 3000, 4000},
+    return (test_config_t){.low_hz = 20000, .reference = {2000, 3000, 4000},
         .enter_tolerance = 10, .exit_threshold = 30, .arm_ms = 2, .depart_ms = 2,
         .delay_ms = 5, .hold_ms = 3, .action = ACTION_KEYBOARD, .keycode = 4};
 }
@@ -199,10 +199,51 @@ static void test_frequency(void) {
     assert(!sample_frequency(UINT32_MAX, 125000000, 15000, &low, &clipped));
     assert(sample_frequency(1, 125000000, 15000, &low, &clipped) == UINT16_MAX && clipped);
 }
+static void test_adaptive_sampling(void) {
+    assert(sample_channel_slot_us(4000) == 1040 && sample_rate_hz(4000) == 240);
+    assert(sample_channel_slot_us(10000) == 440 && sample_rate_hz(10000) == 568);
+    assert(sample_channel_slot_us(15000) == 307 && sample_rate_hz(15000) == 814);
+    assert(sample_channel_slot_us(20000) == 250 && sample_rate_hz(600000) == 1000);
+    uint32_t previous = 0;
+    for (uint32_t low = SENSOR_LOW_MIN_HZ; low <= SENSOR_LOW_MAX_HZ; ++low) {
+        uint32_t rate = sample_rate_hz(low);
+        assert(rate >= 240 && rate <= 1000 && rate >= previous);
+        assert(sample_period_us(low) <= 1000000u / 240u);
+        previous = rate;
+    }
+    test_config_t c = config();
+    c.low_hz = SENSOR_LOW_MIN_HZ - 1;
+    assert(!config_valid(&c));
+    c.low_hz = SENSOR_LOW_MAX_HZ + 1;
+    assert(!config_valid(&c));
+    c.low_hz = 4000;
+    c.arm_ms = c.depart_ms = 5;
+    app_t a;
+    app_init(&a);
+    assert(app_configure(&a, &c));
+    assert(app_set_mode(&a, MODE_TEST, 0) == RESULT_OK);
+    for (unsigned i = 0; i < 3; ++i) {
+        sample_t s = sample(i * 4160u, 0);
+        app_sample(&a, &s);
+        assert(a.state == (i == 2 ? STATE_ARM : STATE_WAIT));
+    }
+    for (unsigned i = 3; i < 6; ++i) {
+        sample_t s = sample(i * 4160u, 30);
+        app_sample(&a, &s);
+    }
+    assert(a.state == STATE_DELAY);
+    app_set_mode(&a, MODE_TEST, 0);
+    sample_t s = sample(100000, 0);
+    app_sample(&a, &s);
+    s = sample(108320, 0);
+    app_sample(&a, &s);
+    assert(a.state == STATE_WAIT && !a.confirming);
+}
 int main(void) {
     test_protocol();
     test_app();
     test_frequency();
+    test_adaptive_sampling();
     puts("protocol, configuration, trigger/release, timer wrap and frequency checks passed");
     return 0;
 }
