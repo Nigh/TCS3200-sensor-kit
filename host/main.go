@@ -420,14 +420,22 @@ func (s *app) plot(c *ui.Context, ch int) {
 		chart.Plot(c, chart.Axes{Left: yscale.Ticks(4), Bottom: xticks}, func(area ui.Element) {
 			area.Label(names[ch] + "，单位 kHz").Description("最近十秒；滚轮缩放，拖动平移，方向键浏览").Focusable()
 			area.HandleInput(func(ev ui.InputEvent) bool { return s.input(ev, s.plotWidths[ch], ch) })
-			_, _, over := area.PointerPosition()
+			pointerX, pointerY, over := area.PointerPosition()
 			if !over && s.hoverChannel == ch && s.hovering {
 				s.hovering = false
 				c.Invalidate()
 			}
 
 			// The painter scale sets physical pixel bins; layout-time stats use the last drawn width/scale.
-			if s.hovering && s.hover >= lo && s.hover <= hi {
+			raw, nearest := sampleDetail(data, ch, lo, hi, s.plotPixels[ch], s.hover)
+			if raw {
+				statsText = "悬停查看样本值与时间\n时间精度 0.1 ms · kHz"
+				if s.hovering && s.hover >= lo && s.hover <= hi {
+					v := data[nearest]
+					statsText = fmt.Sprintf("样本值 %.2f kHz\n时间 %+.1f ms（相对视口右端）", float64(v.values[ch])/100, (float64(v.micros)-hi)/1000)
+				}
+			}
+			if !raw && s.hovering && s.hover >= lo && s.hover <= hi {
 				pixelWidth := max(1, s.plotPixels[ch])
 				bin := math.Min(float64(pixelWidth-1), math.Floor((s.hover-lo)/s.span*float64(pixelWidth)))
 				a := lo + bin*s.span/float64(pixelWidth)
@@ -447,6 +455,10 @@ func (s *app) plot(c *ui.Context, ch int) {
 				s.plotWidths[ch] = r.W
 				pixels := max(1, int(math.Ceil(float64(r.W*p.Scale()))))
 				s.plotPixels[ch] = pixels
+				drawRaw, nearest := sampleDetail(data, ch, lo, hi, pixels, s.hover)
+				if drawRaw != raw {
+					c.Invalidate()
+				}
 				for _, tick := range yscale.Ticks(4) {
 					y := chart.Y(r, tick.At)
 					p.Line(r.X, y, r.X+r.W, y, 1, ui.Hex("#343434"))
@@ -479,13 +491,41 @@ func (s *app) plot(c *ui.Context, ch int) {
 						prev = v
 						first = false
 					}
-					pc.bx, pc.by = minmax(pc.bx, pc.by, pc.xs, pc.ys, pixels)
+					if !drawRaw {
+						pc.bx, pc.by = minmax(pc.bx, pc.by, pc.xs, pc.ys, pixels)
+					}
 				}
 				p.Clip(r, 0, func() {
-					p.StrokePath(chart.Line(r, pc.bx, pc.by, chart.CurveLinear), 1.5, colors[ch])
+					xs, ys := pc.bx, pc.by
+					if drawRaw {
+						xs, ys = pc.xs, pc.ys
+					}
+					p.StrokePath(chart.Line(r, xs, ys, chart.CurveLinear), 1.5, colors[ch])
 					if s.hovering && s.hover >= lo && s.hover <= hi {
-						x := chart.X(r, float32((s.hover-lo)/s.span))
+						cursor := s.hover
+						if drawRaw {
+							cursor = float64(data[nearest].micros)
+						}
+						x := chart.X(r, float32((cursor-lo)/s.span))
 						p.Line(x, r.Y, x, r.Y+r.H, 1, s.theme.TextMuted)
+					}
+					if drawRaw {
+						circles := new(ui.Path)
+						for i, x := range pc.xs {
+							if !math.IsNaN(float64(pc.ys[i])) {
+								circles.Circle(chart.X(r, x), chart.Y(r, pc.ys[i]), 3)
+							}
+						}
+						p.FillPath(circles, s.theme.Surface)
+						p.StrokePath(circles, 1.5, colors[ch])
+						if over && s.hovering && s.hoverChannel == ch {
+							v := data[nearest]
+							x := chart.X(r, float32((float64(v.micros)-lo)/s.span))
+							y := chart.Y(r, yscale.At(float64(v.values[ch])/100))
+							if math.Hypot(float64(pointerX-(x-r.X)), float64(pointerY-(y-r.Y))) <= 6 {
+								p.FillPath(new(ui.Path).Circle(x, y, 3), colors[ch])
+							}
+						}
 					}
 				})
 			})

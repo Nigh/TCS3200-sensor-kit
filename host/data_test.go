@@ -95,3 +95,34 @@ func TestSequenceWrap(t *testing.T) {
 		t.Fatal(h.size, h.drops)
 	}
 }
+
+func TestSampleDetail(t *testing.T) {
+	data := []sample{
+		{micros: 0, channels: 1},
+		{micros: 1000, channels: 1},
+		{micros: 2000, channels: 1},
+		{micros: 3000, channels: 1},
+	}
+	if raw, nearest := sampleDetail(data, 0, 0, 3000, 4, 1600); !raw || nearest != 2 {
+		t.Fatal(raw, nearest)
+	}
+	if raw, _ := sampleDetail(data, 0, 0, 3000, 2, 1600); raw {
+		t.Fatal("colliding pixel bins require aggregation")
+	}
+	if raw, _ := sampleDetail(data, 0, 0, 3000, 0, 1600); raw {
+		t.Fatal("unmeasured width")
+	}
+	if raw, _ := sampleDetail(data, 1, 0, 3000, 4, 1600); raw {
+		t.Fatal("disabled channel")
+	}
+	if raw, nearest := sampleDetail(data, 0, 2000, 3000, 4, 3000); !raw || nearest != 3 {
+		t.Fatal("right endpoint", raw, nearest)
+	}
+	data[1].micros = 100
+	if raw, _ := sampleDetail(data, 0, 0, 3000, 4, 100); raw {
+		t.Fatal("irregular cadence collision")
+	}
+	if raw, _ := sampleDetail(data, 0, 4000, 5000, 4, 4500); raw {
+		t.Fatal("empty window")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/chart"
 )
 
 func testApp(t *testing.T, populated bool) *app {
@@ -195,4 +196,49 @@ func TestVariableCadenceChart(t *testing.T) {
 		t.Fatal("low rate missing")
 	}
 	saveScreen(t, "low-rate", u)
+}
+
+func TestIndividualSampleUI(t *testing.T) {
+	s := testApp(t, false)
+	b := s.backend
+	b.state = "合成演示"
+	s.demo = true
+	b.status = deviceStatus{rate: 1000, slot: 250, low: 20000, channels: 15}
+	for i := range 11 {
+		b.history.add(sample{sequence: uint32(i), micros: 90000 + uint64(i)*1000, channels: 15, values: [4]uint16{10000, 10000, 10000, 10000}})
+	}
+	s.span = 10000
+	u := ui.NewTester(s.view, 1080, 760)
+	u.Frame()
+	r, ok := u.Find("R · 红通道，单位 kHz")
+	if !ok {
+		t.Fatal("plot missing")
+	}
+	pc := s.plots[0]
+	x, y := chart.X(r, pc.xs[5]), chart.Y(r, pc.ys[5])
+	before, _, _, _ := u.Image().At(int(math.Round(float64(x))), int(math.Round(float64(y)))).RGBA()
+	saveScreen(t, "individual-hollow", u)
+	u.Move(x, y)
+	if !u.HasText("样本值 100.00 kHz") || !u.HasText("时间 -5.0 ms") || u.HasText("中位数") || u.HasText("Max / Min") {
+		t.Fatal("sample tooltip", u.Texts())
+	}
+	after, _, _, _ := u.Image().At(int(math.Round(float64(x))), int(math.Round(float64(y)))).RGBA()
+	if before >= 100*257 || after <= 200*257 {
+		t.Fatal("hollow/filled marker", before, after)
+	}
+	saveScreen(t, "individual-hover", u)
+	u.SetSize(1280, 900)
+	u.Frame()
+	saveScreen(t, "individual-desktop", u)
+	u.SetScale(2)
+	u.Frame()
+	if u.HasText("中位数") {
+		t.Fatal("raw mode lost on 2x scale")
+	}
+	s.span = float64(windowUS)
+	u.Frame()
+	u.Move(r.X+r.W/2, r.Y+r.H/2)
+	if !u.HasText("中位数") {
+		t.Fatal("bucket mode not restored", u.Texts())
+	}
 }
