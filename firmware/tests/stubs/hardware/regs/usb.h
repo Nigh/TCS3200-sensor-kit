@@ -1,0 +1,1 @@
+#define USB_EP_STATUS_STALL_NAK_EP1_IN_BITS (1u << 2)

@@ -19,9 +19,10 @@ func testApp(t *testing.T, populated bool) *app {
 		b.state = "合成演示"
 		s.demo = true
 		b.message = "合成测试数据 · 非真实传感器读数"
-		b.status = deviceStatus{rate: 1000, slot: 250, low: 20000}
+		b.status = deviceStatus{rate: 1000, slot: 250, low: 20000, channels: 15}
+		b.usb = usbStatus{1000, 1000}
 		for i := range 12000 {
-			v := sample{sequence: uint32(i), micros: uint64(i * 1000)}
+			v := sample{channels: 15, sequence: uint32(i), micros: uint64(i * 1000)}
 			for ch := range 4 {
 				v.values[ch] = uint16(20000 + ch*5000 + int(4000*math.Sin(float64(i)*.007*float64(ch+1))))
 			}
@@ -59,6 +60,9 @@ func TestMeasurementUI(t *testing.T) {
 			t.Fatal(name)
 		}
 	}
+	if !u.HasText("HID 请求 1000 Hz · 空闲轮询估算 1000 Hz") {
+		t.Fatal("HID poll status missing")
+	}
 	r, ok := u.Find("R · 红通道，单位 kHz")
 	if !ok || r.W < 200 || r.H < 100 {
 		t.Fatal("plot geometry", r)
@@ -76,7 +80,7 @@ func TestMeasurementUI(t *testing.T) {
 	}
 	old := s.end
 	s.backend.mu.Lock()
-	s.backend.history.add(sample{sequence: 12000, micros: 12000000})
+	s.backend.history.add(sample{channels: 15, sequence: 12000, micros: 12000000})
 	s.backend.mu.Unlock()
 	u.Frame()
 	if s.end != old {
@@ -175,9 +179,9 @@ func TestVariableCadenceChart(t *testing.T) {
 	b := s.backend
 	b.state = "合成演示"
 	s.demo = true
-	b.status = deviceStatus{rate: 240, slot: 1040, low: 4000}
+	b.status = deviceStatus{rate: 240, slot: 1040, low: 4000, channels: 15}
 	for i := range 2404 {
-		b.history.add(sample{sequence: uint32(i), micros: uint64(i) * 4160, values: [4]uint16{1000, 2000, 3000, 4000}})
+		b.history.add(sample{channels: 15, sequence: uint32(i), micros: uint64(i) * 4160, values: [4]uint16{1000, 2000, 3000, 4000}})
 	}
 	u := ui.NewTester(s.view, 1080, 760)
 	for _, pc := range s.plots {

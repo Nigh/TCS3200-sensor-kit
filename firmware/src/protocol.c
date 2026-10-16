@@ -93,6 +93,8 @@ void config_decode(test_config_t *c, const uint8_t p[CONFIG_SIZE]) {
     c->modifiers = p[25];
     c->keycode = p[26];
     c->mouse_buttons = p[27];
+    c->channels = p[28];
+    c->channel = p[29];
 }
 void config_encode(uint8_t p[CONFIG_SIZE], const test_config_t *c) {
     wire_put32(p, c->low_hz);
@@ -108,11 +110,15 @@ void config_encode(uint8_t p[CONFIG_SIZE], const test_config_t *c) {
     p[25] = c->modifiers;
     p[26] = c->keycode;
     p[27] = c->mouse_buttons;
+    p[28] = c->channels;
+    p[29] = c->channel;
 }
 bool config_valid(const test_config_t *c) {
+    if (!c->channels || c->channels > 15 || c->channel > 3 || !(c->channels & (1u << c->channel)))
+        return false;
     if (c->low_hz < SENSOR_LOW_MIN_HZ || c->low_hz > SENSOR_LOW_MAX_HZ ||
-        c->exit_threshold <= c->enter_tolerance || !c->arm_ms || c->arm_ms > 60000 ||
-        !c->depart_ms || c->depart_ms > 60000 || c->delay_ms > 60000 ||
+        c->exit_threshold <= c->enter_tolerance || c->arm_ms > 60000 ||
+        c->depart_ms > 60000 || c->delay_ms > 1000 ||
         !c->hold_ms || c->hold_ms > 60000)
         return false;
     for (unsigned i = 0; i < 3; ++i)
@@ -150,4 +156,13 @@ uint16_t sample_frequency(uint32_t counts, uint32_t clock_hz, uint32_t low_hz,
     uint32_t value = (hz + 5u) / 10u;
     *clipped = value > UINT16_MAX;
     return *clipped ? UINT16_MAX : (uint16_t)value;
+}
+
+uint32_t sample_mask_period_us(uint32_t low_hz, uint8_t channels) {
+    unsigned count = 0;
+    for (unsigned i = 0; i < 4; ++i) count += (channels >> i) & 1u;
+    return count ? count * sample_channel_slot_us(low_hz) : 10000u;
+}
+uint16_t sample_mask_rate_hz(uint32_t low_hz, uint8_t channels) {
+    return channels ? (uint16_t)(1000000u / sample_mask_period_us(low_hz, channels)) : 0;
 }

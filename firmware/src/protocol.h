@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PROTOCOL_VERSION 2u
+#define PROTOCOL_VERSION 3u
 #define PROTOCOL_MAX_PAYLOAD 64u
 #define PROTOCOL_OVERHEAD 10u
 #define PROTOCOL_MAX_FRAME (PROTOCOL_MAX_PAYLOAD + PROTOCOL_OVERHEAD)
@@ -13,16 +13,16 @@
 #define SENSOR_MIN_SLOT_US 250u
 #define SENSOR_SLOT_OVERHEAD_US 40u
 #define SENSOR_PERIODS_PER_SLOT 4u
-#define CONFIG_SIZE 28u
+#define CONFIG_SIZE 30u
 #define SAMPLE_SIZE 22u
 
 enum {
     CMD_STATUS = 0x01, CMD_MODE = 0x02, CMD_CONFIG = 0x03,
-    CMD_GET_CONFIG = 0x04, CMD_BOOT = 0x05, CMD_LOW = 0x06,
-    MSG_SAMPLE = 0x40, MSG_ACK = 0x80, MSG_STATUS = 0x81, MSG_CONFIG = 0x84
+    CMD_GET_CONFIG = 0x04, CMD_BOOT = 0x05, CMD_LOW = 0x06, CMD_CHANNELS = 0x07, CMD_USB_STATUS = 0x08,
+    MSG_SAMPLE = 0x40, MSG_ACK = 0x80, MSG_STATUS = 0x81, MSG_CONFIG = 0x84, MSG_USB_STATUS = 0x88
 };
 enum { RESULT_OK, RESULT_LENGTH, RESULT_VALUE, RESULT_NOT_CONFIGURED, RESULT_BUSY, RESULT_UNKNOWN };
-enum { MODE_MEASURE, MODE_TEST };
+enum { MODE_MEASURE, MODE_TEST, MODE_CONTINUOUS };
 enum { STATE_WAIT, STATE_ARM, STATE_DELAY, STATE_PRESS, STATE_HOLD, STATE_RELEASE };
 enum { ACTION_KEYBOARD = 1, ACTION_MOUSE = 2 };
 enum { SAMPLE_LATE = 1 };
@@ -33,12 +33,13 @@ typedef struct {
     uint16_t enter_tolerance, exit_threshold, arm_ms, depart_ms;
     uint32_t delay_ms;
     uint16_t hold_ms;
-    uint8_t action, modifiers, keycode, mouse_buttons;
+    uint8_t action, modifiers, keycode, mouse_buttons, channels, channel;
 } test_config_t;
 typedef struct {
     uint32_t sequence, timestamp_us;
     uint16_t value[4];
-    uint8_t low_mask, clip_mask, flags;
+    uint8_t low_mask, clip_mask, flags, channels;
+    uint32_t detected_us;
 } sample_t;
 typedef void (*protocol_handler_t)(uint8_t type, uint16_t sequence,
                                    const uint8_t *payload, uint16_t length, void *context);
@@ -62,6 +63,8 @@ void config_encode(uint8_t data[CONFIG_SIZE], const test_config_t *config);
 bool config_valid(const test_config_t *config);
 uint32_t sample_channel_slot_us(uint32_t low_hz);
 uint32_t sample_period_us(uint32_t low_hz);
+uint32_t sample_mask_period_us(uint32_t low_hz, uint8_t channels);
+uint16_t sample_mask_rate_hz(uint32_t low_hz, uint8_t channels);
 uint16_t sample_rate_hz(uint32_t low_hz);
 uint16_t sample_frequency(uint32_t counts, uint32_t clock_hz, uint32_t low_hz,
                           bool *low, bool *clipped);

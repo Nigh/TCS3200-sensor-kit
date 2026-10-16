@@ -17,7 +17,7 @@ static void receive(uint8_t type, uint16_t sequence, const uint8_t *payload,
 static void test_protocol(void) {
     assert(protocol_crc((const uint8_t *)"123456789", 9) == 0x29b1);
     uint8_t frame[PROTOCOL_MAX_FRAME];
-    const uint8_t status_vector[] = {0x54, 0x43, 2, 1, 1, 0, 0, 0, 0xb5, 0x59};
+    const uint8_t status_vector[] = {0x54, 0x43, 3, 1, 1, 0, 0, 0, 0x15, 0x1c};
     assert(protocol_encode(frame, CMD_STATUS, 1, NULL, 0) == sizeof(status_vector));
     assert(!memcmp(frame, status_vector, sizeof(status_vector)));
     protocol_parser_t p = {0};
@@ -65,12 +65,12 @@ static void test_protocol(void) {
     }
 }
 static test_config_t config(void) {
-    return (test_config_t){.low_hz = 20000, .reference = {2000, 3000, 4000},
+    return (test_config_t){.low_hz = 20000, .channels = 15, .reference = {2000, 3000, 4000},
         .enter_tolerance = 10, .exit_threshold = 30, .arm_ms = 2, .depart_ms = 2,
         .delay_ms = 5, .hold_ms = 3, .action = ACTION_KEYBOARD, .keycode = 4};
 }
 static sample_t sample(uint32_t time, int difference) {
-    return (sample_t){.timestamp_us = time,
+    return (sample_t){.timestamp_us = time, .detected_us = time, .channels = 15,
         .value = {(uint16_t)(2000 + difference), 3000, 4000, 5000}};
 }
 static void arm_and_depart(app_t *a, uint32_t start) {
@@ -107,7 +107,7 @@ static void test_app(void) {
     c.delay_ms = 60001;
     assert(!config_valid(&c));
     c = config();
-    assert(app_set_mode(&a, 2, 0) == RESULT_VALUE);
+    assert(app_set_mode(&a, 3, 0) == RESULT_VALUE);
     assert(app_set_mode(&a, MODE_TEST, 1000) == RESULT_OK);
     sample_t s = sample(0, 0);
     app_sample(&a, &s);
@@ -134,6 +134,8 @@ static void test_app(void) {
     app_hid_submitted(&a);
     app_hid_complete(&a, 19000);
     assert(a.state == STATE_WAIT);
+    assert(a.mode == MODE_MEASURE);
+    assert(app_set_mode(&a, MODE_TEST, 20000) == RESULT_OK);
     arm_and_depart(&a, 20000);
     app_poll(&a, 30000);
     app_hid_submitted(&a);
@@ -239,7 +241,109 @@ static void test_adaptive_sampling(void) {
     app_sample(&a, &s);
     assert(a.state == STATE_WAIT && !a.confirming);
 }
+static void test_single_channel(void) {
+    for (uint8_t ch = 0; ch < 4; ++ch) {
+        test_config_t c = config();
+        c.channels = (uint8_t)(1u << ch);
+        c.channel = ch;
+        c.arm_ms = c.depart_ms = 0;
+        c.delay_ms = 1000;
+        app_t a;
+        app_init(&a);
+        assert(app_configure(&a, &c));
+        assert(sample_mask_rate_hz(20000, c.channels) == 4000);
+        assert(app_set_mode(&a, MODE_TEST, 0) == RESULT_OK);
+        sample_t s = {.timestamp_us = 100, .detected_us = 340, .channels = c.channels};
+        s.value[ch] = 2000;
+        s.clip_mask = (uint8_t)(15u ^ c.channels);
+        app_sample(&a, &s);
+        assert(a.state == STATE_ARM);
+        s.timestamp_us = 350; s.detected_us = 590;
+        s.value[ch] = 2030;
+        app_sample(&a, &s);
+        assert(a.state == STATE_DELAY && a.deadline_us == 1000590);
+        app_poll(&a, 1000589);
+        assert(a.state == STATE_DELAY);
+        app_poll(&a, 1000590);
+        assert(a.state == STATE_PRESS);
+        app_hid_submitted(&a); app_hid_complete(&a, 1000600);
+        app_poll(&a, 1003600);
+        assert(a.state == STATE_RELEASE);
+        app_hid_submitted(&a); app_hid_complete(&a, 1003700);
+        assert(a.state == STATE_WAIT && a.mode == MODE_MEASURE);
+        app_sample(&a, &s);
+        assert(a.state == STATE_WAIT);
+        assert(app_set_mode(&a, MODE_TEST, 0) == RESULT_OK);
+        app_sample(&a, &s);
+        app_set_mode(&a, MODE_MEASURE, 10);
+        app_poll(&a, 2000000);
+        assert(a.state == STATE_WAIT);
+        c.delay_ms = 1001;
+        assert(!config_valid(&c));
+    }
+    assert(sample_mask_rate_hz(20000, 0) == 0);
+    assert(sample_mask_rate_hz(20000, 3) == 2000);
+}
+static void test_continuous(void) {
+    app_t a;
+    app_init(&a);
+    assert(app_set_mode(&a, MODE_CONTINUOUS, 0) == RESULT_NOT_CONFIGURED);
+    test_config_t c = config();
+    c.channels = 1;
+    c.arm_ms = c.depart_ms = 0;
+    c.delay_ms = 0;
+    c.hold_ms = 1;
+    assert(app_configure(&a, &c));
+    assert(app_set_mode(&a, MODE_CONTINUOUS, 0) == RESULT_OK);
+    for (unsigned cycle = 1; cycle <= 2; ++cycle) {
+        uint32_t base = cycle * 10000u;
+        sample_t s = sample(base, 0);
+        s.channels = 1;
+        app_sample(&a, &s);
+        assert(a.state == STATE_ARM);
+        s = sample(base + 250, 30);
+        s.channels = 1;
+        app_sample(&a, &s);
+        assert(a.state == STATE_DELAY);
+        app_poll(&a, base + 250);
+        assert(a.state == STATE_PRESS);
+        app_hid_submitted(&a);
+        app_hid_complete(&a, base + 500);
+        app_poll(&a, base + 1500);
+        assert(a.state == STATE_RELEASE);
+        app_hid_submitted(&a);
+        app_hid_complete(&a, base + 2000);
+        assert(a.mode == MODE_CONTINUOUS && a.state == STATE_WAIT && a.awaiting_sample);
+        s = sample(base + 1000, 0); // Queued before release: cannot re-arm.
+        s.channels = 1;
+        app_sample(&a, &s);
+        assert(a.state == STATE_WAIT && a.awaiting_sample);
+        s = sample(base + 2250, 30); // Still departed: cannot repeat click.
+        s.channels = 1;
+        app_sample(&a, &s);
+        assert(a.state == STATE_WAIT);
+    }
+    sample_t s = sample(30000, 0);
+    s.channels = 1;
+    app_sample(&a, &s);
+    assert(a.state == STATE_ARM);
+    s = sample(30250, 30);
+    s.channels = 1;
+    app_sample(&a, &s);
+    app_poll(&a, 30250);
+    app_hid_submitted(&a);
+    app_set_mode(&a, MODE_MEASURE, 30300);
+    app_hid_complete(&a, 30500);
+    assert(a.state == STATE_RELEASE);
+    app_hid_submitted(&a);
+    app_hid_complete(&a, 30750);
+    assert(a.mode == MODE_MEASURE && a.state == STATE_WAIT);
+    app_sample(&a, &s);
+    assert(a.state == STATE_WAIT);
+}
 int main(void) {
+    test_continuous();
+    test_single_channel();
     test_protocol();
     test_app();
     test_frequency();

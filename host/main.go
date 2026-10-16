@@ -20,29 +20,35 @@ type plotCache struct {
 	key            string
 }
 type app struct {
-	backend            *backend
-	selected, lowInput string
-	inputInitialized   bool
-	lowFocused         bool
-	epoch              uint64
-	live, snapshot     []sample
-	paused             bool
-	refreshPaused      atomic.Bool
-	end, span          float64
-	hover              float64
-	hoverFraction      float64
-	hovering           bool
-	hoverChannel       int
-	demo               bool
-	plotPixels         [4]int
-	plotWidths         [4]float32
-	drag               bool
-	dragX, dragEnd     float64
-	plots              [4]plotCache
-	scratch            []uint16
-	theme              *ui.Theme
-	invalidateStarted  bool
-	stop               chan struct{}
+	backend                           *backend
+	tab                               int
+	reference                         uint16
+	referenceValid                    bool
+	referenceChannel                  byte
+	referenceLow                      uint32
+	delayInput, enterInput, exitInput string
+	selected, lowInput                string
+	inputInitialized                  bool
+	lowFocused                        bool
+	epoch                             uint64
+	live, snapshot                    []sample
+	paused                            bool
+	refreshPaused                     atomic.Bool
+	end, span                         float64
+	hover                             float64
+	hoverFraction                     float64
+	hovering                          bool
+	hoverChannel                      int
+	demo                              bool
+	plotPixels                        [4]int
+	plotWidths                        [4]float32
+	drag                              bool
+	dragX, dragEnd                    float64
+	plots                             [4]plotCache
+	scratch                           []uint16
+	theme                             *ui.Theme
+	invalidateStarted                 bool
+	stop                              chan struct{}
 }
 
 func newApp(b *backend) *app {
@@ -59,7 +65,7 @@ func newApp(b *backend) *app {
 	t.Radius = 8
 	t.FontSize = 14
 	t.Font = "Noto Sans CJK SC"
-	return &app{backend: b, span: float64(windowUS), theme: t, stop: make(chan struct{}), lowInput: "15000"}
+	return &app{backend: b, span: float64(windowUS), theme: t, stop: make(chan struct{}), lowInput: "15000", delayInput: "0", enterInput: "10", exitInput: "30"}
 }
 func (s *app) data() []sample {
 	if s.paused {
@@ -194,6 +200,7 @@ func (s *app) view(c *ui.Context) {
 	devices := slices.Clone(b.devices)
 	state, message := b.state, b.message
 	status := b.status
+	usb := b.usb
 	busy, enumerating := b.adjusting, b.enumerating
 	errors, drops := b.parserErrors, b.history.drops
 	if s.epoch != b.resetID {
@@ -203,6 +210,7 @@ func (s *app) view(c *ui.Context) {
 		s.snapshot = s.snapshot[:0]
 		s.live = s.live[:0]
 		s.inputInitialized = false
+		s.referenceValid = false
 		s.hovering = false
 		s.drag = false
 		s.span = float64(windowUS)
@@ -245,7 +253,7 @@ func (s *app) view(c *ui.Context) {
 				}
 				return fmt.Sprintf("当前最大采样率 %d Hz", status.rate)
 			}()).TextColor(s.theme.TextMuted).FontSize(12)
-			ui.Textf(c, "所填最大采样率 %d Hz", maximumRateHz(clampedLowInput(s.lowInput, status.low))).FontSize(12).TextColor(s.theme.TextMuted)
+			ui.Textf(c, "所填最大采样率 %d Hz", maskedRateHz(clampedLowInput(s.lowInput, status.low), status.channels)).FontSize(12).TextColor(s.theme.TextMuted)
 		})
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			label := "枚举设备"
@@ -282,35 +290,76 @@ func (s *app) view(c *ui.Context) {
 				b.setLow(v)
 			}
 		})
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			label := "暂停刷新"
-			if s.paused {
-				label = "恢复实时"
+		previousTab := s.tab
+		tabs := ui.TabsBase(c, &s.tab, 2)
+		tabs.List.Gap(4).Padding(4).Background(s.theme.Surface).Border(1, s.theme.Border).Radius(8).Children(func() {
+			for i, name := range []string{"波形测量", "自动触发测试"} {
+				tab := tabs.Tab(i).Label(name).Grow(1).Basis(0).MinWidth(0).Height(36).Center().Radius(5)
+				color := s.theme.TextMuted
+				if i == s.tab {
+					tab.Background(s.theme.Accent)
+					color = s.theme.AccentText
+				} else if tab.Hovered() {
+					tab.Background(s.theme.Border)
+					color = s.theme.Text
+				}
+				tab.Children(func() { ui.Text(c, name).TextColor(color).Bold().SingleLine() })
 			}
-			if ui.Button(c, label).Disabled(len(data) == 0).Clicked() {
-				if s.paused {
-					s.resume()
-				} else {
-					s.freeze()
+		})
+		if previousTab != s.tab && s.tab == 1 {
+			s.resume()
+		}
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "采集通道")
+			for ch, name := range []string{"R", "G", "B", "Clear"} {
+				enabled := status.channels&(1<<ch) != 0
+				before := enabled
+				ui.Checkbox(c, &enabled, name).Disabled(state != "已连接" || busy || status.mode != 0 || status.state != 0 || s.demo)
+				if enabled != before {
+					b.setChannels(status.channels ^ (1 << ch))
+					s.referenceValid = false
 				}
 			}
-			if ui.Button(c, "回到实时").Disabled(!s.paused && s.span == float64(windowUS)).Clicked() {
-				s.resume()
-			}
-			mode := "实时"
-			if s.paused {
-				mode = "快照"
-			}
-			ui.Textf(c, "%s · %.3g s", mode, s.span/1e6).TextColor(s.theme.Accent)
-			ui.Box(c).Grow(1)
-			ui.Text(c, "滚轮缩放 · 拖动平移 · +/- 缩放 · ←/→ 平移 · Esc 实时").FontSize(12).TextColor(s.theme.TextMuted)
+			ui.Text(c, "少开通道可提高采样率；降低低频阈值可扩大动态范围").FontSize(12).TextColor(s.theme.TextMuted)
 		})
-		ui.Grid(c).ColumnTracks(ui.Fr(1), ui.Fr(1)).RowTracks(ui.Fr(1), ui.Fr(1)).Grow(1).MinHeight(400).Gap(12).Children(func() {
-			for ch := range 4 {
-				s.plot(c.Key(ch), ch)
-			}
-		})
-		ui.Text(c, message).TextColor(func() ui.Color {
+		if s.tab == 1 {
+			s.testView(c, status, state == "已连接" && !busy && !s.demo)
+		} else {
+
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				label := "暂停刷新"
+				if s.paused {
+					label = "恢复实时"
+				}
+				if ui.Button(c, label).Disabled(len(data) == 0).Clicked() {
+					if s.paused {
+						s.resume()
+					} else {
+						s.freeze()
+					}
+				}
+				if ui.Button(c, "回到实时").Disabled(!s.paused && s.span == float64(windowUS)).Clicked() {
+					s.resume()
+				}
+				mode := "实时"
+				if s.paused {
+					mode = "快照"
+				}
+				ui.Textf(c, "%s · %.3g s", mode, s.span/1e6).TextColor(s.theme.Accent)
+				ui.Box(c).Grow(1)
+				ui.Text(c, "滚轮缩放 · 拖动平移 · +/- 缩放 · ←/→ 平移 · Esc 实时").FontSize(12).TextColor(s.theme.TextMuted)
+			})
+			ui.Grid(c).ColumnTracks(ui.Fr(1), ui.Fr(1)).RowTracks(ui.Fr(1), ui.Fr(1)).Grow(1).MinHeight(400).Gap(12).Children(func() {
+				for ch := range 4 {
+					if status.channels&(1<<ch) != 0 || state != "已连接" {
+						s.plot(c.Key(ch), ch)
+					} else {
+						ui.Text(c, [4]string{"R", "G", "B", "Clear"}[ch]+" · 已关闭")
+					}
+				}
+			})
+		}
+		ui.Text(c, message+" · "+usb.text()).TextColor(func() ui.Color {
 			if state == "异常" {
 				return s.theme.Danger
 			}
@@ -338,7 +387,7 @@ func (s *app) plot(c *ui.Context, ch int) {
 	}
 	maxY := float64(1)
 	for _, v := range data {
-		if float64(v.micros) >= lo && float64(v.micros) <= hi {
+		if v.channels&(1<<ch) != 0 && float64(v.micros) >= lo && float64(v.micros) <= hi {
 			maxY = max(maxY, float64(v.values[ch])/100)
 		}
 	}
@@ -422,7 +471,11 @@ func (s *app) plot(c *ui.Context, ch int) {
 							pc.ys = append(pc.ys, float32(math.NaN()))
 						}
 						pc.xs = append(pc.xs, x)
-						pc.ys = append(pc.ys, yscale.At(float64(v.values[ch])/100))
+						y := yscale.At(float64(v.values[ch]) / 100)
+						if v.channels&(1<<ch) == 0 {
+							y = float32(math.NaN())
+						}
+						pc.ys = append(pc.ys, y)
 						prev = v
 						first = false
 					}
@@ -467,7 +520,7 @@ func main() {
 }
 func startDemo(b *backend, stop <-chan struct{}) {
 	b.message = "合成演示数据 · 非真实传感器读数"
-	b.status = deviceStatus{rate: 1000, slot: 250, low: 20000}
+	b.status = deviceStatus{rate: 1000, slot: 250, low: 20000, channels: 15}
 	b.dirty = true
 	go func() {
 		ticker := time.NewTicker(10 * time.Millisecond)
@@ -482,7 +535,7 @@ func startDemo(b *backend, stop <-chan struct{}) {
 				target := uint32(time.Since(start) / time.Millisecond)
 				b.mu.Lock()
 				for ; seq < target; seq++ {
-					v := sample{sequence: seq, micros: uint64(seq) * 1000}
+					v := sample{sequence: seq, micros: uint64(seq) * 1000, channels: 15}
 					for ch := range 4 {
 						x := float64(seq) / 1000
 						value := 19000 + float64(ch)*7000 + 4000*math.Sin(x*float64(ch+1)*3) + 500*math.Sin(x*157)
