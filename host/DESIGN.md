@@ -149,6 +149,8 @@ The footer retains transport/measurement messages, drop and decode counters, pro
 
 Native components have no shipped HTML/CSS snippets. The sidecar deliberately omits browser component previews and mobile breakpoints rather than fabricating an alternate implementation.
 
+When each occupied physical pixel column holds at most one enabled-channel sample, show individual sample frequency and its time relative to the viewport end, formatted to 0.1 ms, instead of bucket statistics. Draw 3 DIP radius hollow markers with a 1.5 DIP channel-colored outline; fill the marker when the pointer is within 6 DIP of its center. Snap the raw-mode cursor to the nearest actual sample and retain the reserved statistics strip. Dense views keep the existing pixel-bucket summary.
+
 ## Do's and Don'ts
 
 ### Do:

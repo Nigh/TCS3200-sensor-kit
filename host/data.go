@@ -152,3 +152,27 @@ func recentStats(data []sample, ch int) (mean, low, high float64, count int) {
 	}
 	return
 }
+
+// Individual samples need no aggregation when every occupied physical pixel has one sample.
+func sampleDetail(data []sample, ch int, lo, hi float64, pixels int, hover float64) (raw bool, nearest int) {
+	nearest, previousBin := -1, -1
+	if pixels <= 0 || hi <= lo {
+		return false, -1
+	}
+	distance := math.Inf(1)
+	for i, s := range data {
+		t := float64(s.micros)
+		if s.channels&(1<<ch) == 0 || t < lo || t > hi {
+			continue
+		}
+		bin := min(pixels-1, int(math.Floor((t-lo)/(hi-lo)*float64(pixels))))
+		if bin == previousBin {
+			return false, -1
+		}
+		previousBin = bin
+		if d := math.Abs(t - hover); d < distance {
+			distance, nearest = d, i
+		}
+	}
+	return nearest >= 0, nearest
+}
