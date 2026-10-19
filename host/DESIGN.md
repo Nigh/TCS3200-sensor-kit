@@ -104,7 +104,7 @@ Warning flags and error messages use inherited MyGo `Warning` and `Danger` roles
 The hierarchy favors legible Chinese controls and consistently formatted numerical readings. Token sizes are portable px notation for native logical UI units (DIP), not a CSS implementation contract.
 
 - **Title:** bold application name.
-- **Reading:** channel frequency with two decimal places and kHz units.
+- **Reading:** channel pulse width with one decimal place and μs units.
 - **Body:** controls and channel labels; channel names are bold.
 - **Message:** persistent transport or validation message.
 - **Label:** help, metadata, warning flags and two-line bucket statistics.
@@ -133,7 +133,7 @@ Use MyGo `Button`, `PrimaryButton`, `Select` and `TextInput`. Connection is the 
 
 ### Measurement panel
 
-A surface container holds a channel label, latest frequency and textual LOW/CLIP/LATE flags above the plot. Each panel retains the same structure. Empty plots show “等待 USB 采样” and the enumeration → selection → connection path. Flags use the framework warning role.
+A surface container holds a channel label, latest pulse width and textual LOW/CLIP/LATE flags above the plot. Each panel retains the same structure. Empty plots show “等待 USB 采样” and the enumeration → selection → connection path. Flags use the framework warning role.
 
 ### Linked inspection
 
@@ -149,7 +149,7 @@ The footer retains transport/measurement messages, drop and decode counters, pro
 
 Native components have no shipped HTML/CSS snippets. The sidecar deliberately omits browser component previews and mobile breakpoints rather than fabricating an alternate implementation.
 
-When each occupied physical pixel column holds at most one enabled-channel sample, show individual sample frequency and its time relative to the viewport end, formatted to 0.1 ms, instead of bucket statistics. Draw 3 DIP radius hollow markers with a 1.5 DIP channel-colored outline; fill the marker when the pointer is within 6 DIP of its center. Snap the raw-mode cursor to the nearest actual sample and retain the reserved statistics strip. Dense views keep the existing pixel-bucket summary.
+When each occupied physical pixel column holds at most one enabled-channel sample, show individual sample pulse width and its time relative to the viewport end, formatted to 0.1 ms, instead of bucket statistics. Draw 3 DIP radius hollow markers with a 1.5 DIP channel-colored outline; fill the marker when the pointer is within 6 DIP of its center. Snap the raw-mode cursor to the nearest actual sample and retain the reserved statistics strip. Dense views keep the existing pixel-bucket summary.
 
 ## Do's and Don'ts
 

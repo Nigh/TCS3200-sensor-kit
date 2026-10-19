@@ -45,7 +45,7 @@ type app struct {
 	drag                              bool
 	dragX, dragEnd                    float64
 	plots                             [4]plotCache
-	scratch                           []uint16
+	scratch                           []float64
 	theme                             *ui.Theme
 	invalidateStarted                 bool
 	stop                              chan struct{}
@@ -367,7 +367,7 @@ func (s *app) view(c *ui.Context) {
 		}()).FontSize(13)
 		threshold := "—"
 		if status.low > 0 {
-			threshold = fmt.Sprintf("%.2f kHz", float64(status.low)/1000)
+			threshold = fmt.Sprintf("%.1f μs", 500000/float64(status.low))
 		}
 		ui.Textf(c, "采样丢组 %d · 设备采集丢组 %d · 发送丢组 %d · 解码错误 %d · 设备协议错误 %d · 阈值 %s", drops, status.captureDrops, status.streamDrops, errors, status.parserErrors, threshold).FontSize(12).TextColor(s.theme.TextMuted)
 	})
@@ -388,7 +388,9 @@ func (s *app) plot(c *ui.Context, ch int) {
 	maxY := float64(1)
 	for _, v := range data {
 		if v.channels&(1<<ch) != 0 && float64(v.micros) >= lo && float64(v.micros) <= hi {
-			maxY = max(maxY, float64(v.values[ch])/100)
+			if v := pulseUS(v.values[ch]); !math.IsNaN(v) {
+				maxY = max(maxY, v)
+			}
 		}
 	}
 	yscale := chart.NewLinear(0, maxY*1.08).Nice(4)
@@ -397,9 +399,9 @@ func (s *app) plot(c *ui.Context, ch int) {
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
 			ui.Text(c, names[ch]).TextColor(colors[ch]).Bold()
 			ui.Box(c).Grow(1)
-			value := "— kHz"
+			value := "— μs"
 			if len(data) > 0 {
-				value = fmt.Sprintf("%.2f kHz", float64(last.values[ch])/100)
+				value = pulseText(last.values[ch])
 			}
 			ui.Text(c, value).FontSize(20)
 			flags := ""
@@ -416,9 +418,9 @@ func (s *app) plot(c *ui.Context, ch int) {
 			}
 			ui.Text(c, flags).FontSize(12).TextColor(s.theme.Warning)
 		})
-		var statsText = "悬停查看时间桶与样本数\nMax / Min / 中位数 · kHz"
+		var statsText = "悬停查看时间桶与样本数\nMax / Min / 中位数 · μs"
 		chart.Plot(c, chart.Axes{Left: yscale.Ticks(4), Bottom: xticks}, func(area ui.Element) {
-			area.Label(names[ch] + "，单位 kHz").Description("最近十秒；滚轮缩放，拖动平移，方向键浏览").Focusable()
+			area.Label(names[ch] + "，单位 μs").Description("最近十秒；滚轮缩放，拖动平移，方向键浏览").Focusable()
 			area.HandleInput(func(ev ui.InputEvent) bool { return s.input(ev, s.plotWidths[ch], ch) })
 			pointerX, pointerY, over := area.PointerPosition()
 			if !over && s.hoverChannel == ch && s.hovering {
@@ -429,10 +431,10 @@ func (s *app) plot(c *ui.Context, ch int) {
 			// The painter scale sets physical pixel bins; layout-time stats use the last drawn width/scale.
 			raw, nearest := sampleDetail(data, ch, lo, hi, s.plotPixels[ch], s.hover)
 			if raw {
-				statsText = "悬停查看样本值与时间\n时间精度 0.1 ms · kHz"
+				statsText = "悬停查看样本值与时间\n时间精度 0.1 ms · μs"
 				if s.hovering && s.hover >= lo && s.hover <= hi {
 					v := data[nearest]
-					statsText = fmt.Sprintf("样本值 %.2f kHz\n时间 %+.1f ms（相对视口右端）", float64(v.values[ch])/100, (float64(v.micros)-hi)/1000)
+					statsText = fmt.Sprintf("样本值 %s\n时间 %+.1f ms（相对视口右端）", pulseText(v.values[ch]), (float64(v.micros)-hi)/1000)
 				}
 			}
 			if !raw && s.hovering && s.hover >= lo && s.hover <= hi {
@@ -446,9 +448,9 @@ func (s *app) plot(c *ui.Context, ch int) {
 				st, scratch := bucketStats(data, ch, a, z, s.scratch)
 				s.scratch = scratch
 				if st.count == 0 {
-					statsText = "当前时间桶无数据\nMax — · Min — · 中位数 — kHz"
+					statsText = "当前时间桶无数据\nMax — · Min — · 中位数 — μs"
 				} else {
-					statsText = fmt.Sprintf("%+.4f…%+.4f s · n=%d\nMax %.2f · Min %.2f · 中位数 %.2f kHz", (a-hi)/1e6, (z-hi)/1e6, st.count, st.max, st.min, st.median)
+					statsText = fmt.Sprintf("%+.4f…%+.4f s · n=%d\nMax %.1f · Min %.1f · 中位数 %.1f μs", (a-hi)/1e6, (z-hi)/1e6, st.count, st.max, st.min, st.median)
 				}
 			}
 			area.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -483,7 +485,7 @@ func (s *app) plot(c *ui.Context, ch int) {
 							pc.ys = append(pc.ys, float32(math.NaN()))
 						}
 						pc.xs = append(pc.xs, x)
-						y := yscale.At(float64(v.values[ch]) / 100)
+						y := yscale.At(pulseUS(v.values[ch]))
 						if v.channels&(1<<ch) == 0 {
 							y = float32(math.NaN())
 						}
@@ -521,7 +523,7 @@ func (s *app) plot(c *ui.Context, ch int) {
 						if over && s.hovering && s.hoverChannel == ch {
 							v := data[nearest]
 							x := chart.X(r, float32((float64(v.micros)-lo)/s.span))
-							y := chart.Y(r, yscale.At(float64(v.values[ch])/100))
+							y := chart.Y(r, yscale.At(pulseUS(v.values[ch])))
 							if math.Hypot(float64(pointerX-(x-r.X)), float64(pointerY-(y-r.Y))) <= 6 {
 								p.FillPath(new(ui.Path).Circle(x, y, 3), colors[ch])
 							}
@@ -541,7 +543,7 @@ func (s *app) plot(c *ui.Context, ch int) {
 }
 
 func main() {
-	demo := flag.Bool("demo", false, "使用明确标注的合成 1 kHz 四通道信号，不连接 USB")
+	demo := flag.Bool("demo", false, "使用明确标注的以 1 kHz 采样的合成四通道信号，不连接 USB")
 	flag.Parse()
 	b := newBackend()
 	s := newApp(b)
