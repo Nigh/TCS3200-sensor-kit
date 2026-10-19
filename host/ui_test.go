@@ -64,7 +64,7 @@ func TestMeasurementUI(t *testing.T) {
 	if !u.HasText("HID 请求 1000 Hz · 空闲轮询估算 1000 Hz") {
 		t.Fatal("HID poll status missing")
 	}
-	r, ok := u.Find("R · 红通道，单位 kHz")
+	r, ok := u.Find("R · 红通道，单位 μs")
 	if !ok || r.W < 200 || r.H < 100 {
 		t.Fatal("plot geometry", r)
 	}
@@ -113,7 +113,7 @@ func TestMeasurementUI(t *testing.T) {
 	}
 	u.SetSize(1080, 760)
 	saveScreen(t, "minimum", u)
-	for _, name := range []string{"R · 红通道，单位 kHz", "G · 绿通道，单位 kHz", "B · 蓝通道，单位 kHz", "Clear · 透明通道，单位 kHz"} {
+	for _, name := range []string{"R · 红通道，单位 μs", "G · 绿通道，单位 μs", "B · 蓝通道，单位 μs", "Clear · 透明通道，单位 μs"} {
 		r, ok := u.Find(name)
 		if !ok || r.X < 0 || r.Y < 0 || r.X+r.W > 1080 || r.Y+r.H > 760 {
 			t.Fatal("plot outside window", name, r)
@@ -210,7 +210,7 @@ func TestIndividualSampleUI(t *testing.T) {
 	s.span = 10000
 	u := ui.NewTester(s.view, 1080, 760)
 	u.Frame()
-	r, ok := u.Find("R · 红通道，单位 kHz")
+	r, ok := u.Find("R · 红通道，单位 μs")
 	if !ok {
 		t.Fatal("plot missing")
 	}
@@ -219,7 +219,7 @@ func TestIndividualSampleUI(t *testing.T) {
 	before, _, _, _ := u.Image().At(int(math.Round(float64(x))), int(math.Round(float64(y)))).RGBA()
 	saveScreen(t, "individual-hollow", u)
 	u.Move(x, y)
-	if !u.HasText("样本值 100.00 kHz") || !u.HasText("时间 -5.0 ms") || u.HasText("中位数") || u.HasText("Max / Min") {
+	if !u.HasText("样本值 5.0 μs") || !u.HasText("时间 -5.0 ms") || u.HasText("中位数") || u.HasText("Max / Min") {
 		t.Fatal("sample tooltip", u.Texts())
 	}
 	after, _, _, _ := u.Image().At(int(math.Round(float64(x))), int(math.Round(float64(y)))).RGBA()

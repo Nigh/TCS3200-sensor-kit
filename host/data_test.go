@@ -45,11 +45,11 @@ func TestMinmaxAndStats(t *testing.T) {
 	}
 	data := []sample{{channels: 15, micros: 1, values: [4]uint16{100}}, {channels: 15, micros: 2, values: [4]uint16{400}}, {channels: 15, micros: 3, values: [4]uint16{200}}, {channels: 15, micros: 4, values: [4]uint16{300}}}
 	s, _ := bucketStats(data, 0, 1, 5, nil)
-	if s.count != 4 || s.min != 1 || s.max != 4 || s.median != 2.5 {
+	if s.count != 4 || s.min != 125 || s.max != 500 || math.Abs(s.median-208.33333333333334) > 1e-9 {
 		t.Fatal(s)
 	}
 	s, _ = bucketStats(data, 0, 1, 4, nil)
-	if s.median != 2 {
+	if s.median != 250 {
 		t.Fatal(s)
 	}
 	s, _ = bucketStats(data, 0, 5, 6, nil)
@@ -124,5 +124,22 @@ func TestSampleDetail(t *testing.T) {
 	}
 	if raw, _ := sampleDetail(data, 0, 4000, 5000, 4, 4500); raw {
 		t.Fatal("empty window")
+	}
+}
+
+func TestPulseWidths(t *testing.T) {
+	if pulseUS(10000) != 5 || pulseText(1234) != "40.5 μs" || pulseText(0) != "— μs" || !math.IsNaN(pulseUS(65535)) {
+		t.Fatal("pulse conversion or missing reading")
+	}
+	data := []sample{
+		{channels: 1, values: [4]uint16{0}},
+		{channels: 1, values: [4]uint16{65535}},
+		{channels: 1, values: [4]uint16{10000}},
+		{channels: 1, values: [4]uint16{20000}},
+	}
+	stats, _ := bucketStats(data, 0, 0, 1, nil)
+	mean, low, high, n := recentStats(data, 0)
+	if stats.count != 2 || stats.median != 3.75 || mean != 3.75 || low != 2.5 || high != 5 || n != 2 {
+		t.Fatal(stats, mean, low, high, n)
 	}
 }

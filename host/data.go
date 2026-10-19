@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"slices"
 )
@@ -58,16 +59,33 @@ func (h *history) copyTo(dst []sample) []sample {
 	return dst
 }
 
+// TCS3200 has a 50% duty cycle; the wire value is in 10 Hz units.
+// LOW/zero and saturated readings have no finite, exact pulse width.
+func pulseUS(value uint16) float64 {
+	if value == 0 || value == 65535 {
+		return math.NaN()
+	}
+	return 50000 / float64(value)
+}
+func pulseText(value uint16) string {
+	if v := pulseUS(value); !math.IsNaN(v) {
+		return fmt.Sprintf("%.1f μs", v)
+	}
+	return "— μs"
+}
+
 type statistics struct {
 	min, max, median float64
 	count            int
 }
 
-func bucketStats(data []sample, ch int, lo, hi float64, scratch []uint16) (statistics, []uint16) {
+func bucketStats(data []sample, ch int, lo, hi float64, scratch []float64) (statistics, []float64) {
 	scratch = scratch[:0]
 	for _, s := range data {
 		if s.channels&(1<<ch) != 0 && float64(s.micros) >= lo && float64(s.micros) < hi {
-			scratch = append(scratch, s.values[ch])
+			if v := pulseUS(s.values[ch]); !math.IsNaN(v) {
+				scratch = append(scratch, v)
+			}
 		}
 	}
 	if len(scratch) == 0 {
@@ -79,7 +97,7 @@ func bucketStats(data []sample, ch int, lo, hi float64, scratch []uint16) (stati
 	if n%2 == 0 {
 		med = (med + float64(scratch[n/2-1])) / 2
 	}
-	return statistics{float64(scratch[0]) / 100, float64(scratch[n-1]) / 100, med / 100, n}, scratch
+	return statistics{scratch[0], scratch[n-1], med, n}, scratch
 }
 
 // shortcut: app-side pixel Min/Max uses the existing CPU path; replace with upstream chart.MinMax and StrokePolyline after mygo PR #363 lands.
@@ -139,7 +157,10 @@ func recentStats(data []sample, ch int) (mean, low, high float64, count int) {
 		if end-s.micros > 500000 || s.channels&(1<<ch) == 0 || s.clip&(1<<ch) != 0 || s.flags != 0 {
 			continue
 		}
-		v := float64(s.values[ch]) / 100
+		v := pulseUS(s.values[ch])
+		if math.IsNaN(v) {
+			continue
+		}
 		if count == 0 {
 			low, high = v, v
 		}

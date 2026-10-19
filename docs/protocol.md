@@ -216,6 +216,6 @@ SAMPLE：seq=0，timestamp=100000，四通道为零，low_mask=0x0F，channels=0
 
 ## 上位机 ARM 自动标定
 
-Set ARM Color 使用最近 500 ms 有效样本的平均值（四舍五入到 10 Hz）作为 reference[0]，不再使用最后一个瞬时值。LOW 零值参与，CLIP/LATE 和关闭通道不参与；数据不新鲜、窗口尚不足 500 ms、有效样本少于两个或波动过大时拒绝标定并提示重试。
+上位机采样显示采用脉宽（μs，1 位小数），按 50% 占空比以 `50000/value` 换算。Set ARM Color 先计算最近 500 ms 有效样本的平均脉宽，再取倒数换回协议频率作为 reference[0]（四舍五入到 10 Hz）。LOW 零值、CLIP/LATE 和关闭通道不参与脉宽标定；数据不新鲜、窗口尚不足 500 ms、有效样本少于两个或波动过大时拒绝标定并提示重试。
 
-以下均为协议原始单位（10 Hz）：`envelope=max(reference-min, max-reference)`；`margin=max(2, ceil(envelope/4), ceil(reference/200))`；`enter_tolerance=envelope+margin`；`exit_threshold=enter_tolerance+max(envelope, 2*margin)`。容差覆盖观测范围并留有至少 20 Hz 噪声余量，退出阈值与容差额外间隔至少 40 Hz；阈值超出有效频率可达到的偏离距离时拒绝标定，不通过截断破坏迟滞。操作者仍可手动调整。
+以下均为协议原始单位（10 Hz）：`envelope=max(reference-min, max-reference)`；`margin=max(2, ceil(envelope/4), ceil(reference/200))`；`enter_tolerance=envelope+margin`；`exit_threshold=enter_tolerance+max(envelope, 2*margin)`。容差覆盖观测范围并留有至少 20 Hz 噪声余量，退出阈值与容差额外间隔至少 40 Hz；阈值超出有效频率可达到的偏离距离时拒绝标定，不通过截断破坏迟滞。上位机将所得频率距离按短脉宽侧边界换算成 μs，向上取整到 0.1 μs 并保持至少 0.1 μs 的迟滞间隔；操作者仍可手动调整。发送配置时再反向换算，协议布局和固件比较逻辑不变，因此长脉宽侧的实际边界不对称。

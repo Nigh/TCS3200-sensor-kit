@@ -43,7 +43,7 @@ func TestSingleChannelTriggerConfigAndStats(t *testing.T) {
 		{micros: 1000000, channels: 1, values: [4]uint16{300}},
 	}
 	mean, low, high, n := recentStats(data, 0)
-	if n != 3 || mean != 2 || low != 1 || high != 3 {
+	if n != 3 || math.Abs(mean-305.55555555555554) > 1e-9 || low != 50000.0/300 || high != 500 {
 		t.Fatal(mean, low, high, n)
 	}
 }
@@ -68,7 +68,7 @@ func TestTriggerTab(t *testing.T) {
 			t.Fatal(text, u.Texts())
 		}
 	}
-	if _, ok := u.Find("R · 红通道，单位 kHz"); ok {
+	if _, ok := u.Find("R · 红通道，单位 μs"); ok {
 		t.Fatal("waveform in test tab")
 	}
 	saveScreen(t, "trigger-minimum", u)
@@ -103,10 +103,10 @@ func TestTriggerUICommands(t *testing.T) {
 	if err := u.Click("Set ARM Color"); err != nil {
 		t.Fatal(err)
 	}
-	if !s.referenceValid || s.reference != 1234 {
+	if !s.referenceValid || s.reference != 1233 {
 		t.Fatal("baseline", s.reference)
 	}
-	if s.enterInput != "43" || s.exitInput != "77" {
+	if s.enterInput != "1.4" || s.exitInput != "2.5" {
 		t.Fatal("automatic thresholds", s.enterInput, s.exitInput)
 	}
 	if err := u.Click("Test"); err != nil {
@@ -114,7 +114,7 @@ func TestTriggerUICommands(t *testing.T) {
 	}
 	waitFor(t, func() bool { b.mu.Lock(); defer b.mu.Unlock(); return !b.adjusting && b.status.mode == 1 })
 	p.mu.Lock()
-	if len(p.config) != 30 || p.config[29] != 3 || binary.LittleEndian.Uint16(p.config[4:]) != 1234 {
+	if len(p.config) != 30 || p.config[29] != 3 || binary.LittleEndian.Uint16(p.config[4:]) != 1233 {
 		t.Error("configuration", p.config)
 	}
 	p.mu.Unlock()
@@ -147,5 +147,16 @@ func TestAutomaticArmEnvelope(t *testing.T) {
 	}
 	if _, _, _, ok := autoArmThresholds(327.67, 0, 655.34); ok {
 		t.Fatal("unusable full-scale noise accepted")
+	}
+}
+
+func TestPulseTriggerThreshold(t *testing.T) {
+	if pulseTolerance(10000, 2500) != 1 || pulseThreshold(10000, 1) != 2500 {
+		t.Fatal("pulse threshold conversion")
+	}
+	for _, v := range []float64{-1, 5, 6, math.NaN(), math.Inf(1)} {
+		if pulseThreshold(10000, v) != 65535 {
+			t.Fatal("invalid pulse tolerance", v)
+		}
 	}
 }
