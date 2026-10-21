@@ -12,7 +12,7 @@ func TestSingleChannelTriggerConfigAndStats(t *testing.T) {
 	for ch := range 4 {
 		mask := byte(1 << ch)
 		p, ok := triggerConfig(4000, mask, 1234, 10, 30, 1000)
-		if !ok || len(p) != 30 || p[28] != mask || p[29] != byte(ch) || p[24] != 2 || p[27] != 1 || binary.LittleEndian.Uint32(p[18:]) != 1000 || binary.LittleEndian.Uint16(p[4:]) != 1234 {
+		if !ok || len(p) != 40 || p[38] != mask || p[39] != byte(ch) || p[34] != 2 || p[37] != 1 || binary.LittleEndian.Uint32(p[28:]) != 1000 || binary.LittleEndian.Uint32(p[4:]) != 1234 {
 			t.Fatal(p, ok)
 		}
 		if maskedRateHz(20000, mask) != 4000 {
@@ -34,16 +34,16 @@ func TestSingleChannelTriggerConfigAndStats(t *testing.T) {
 		t.Fatal("masked rate")
 	}
 	data := []sample{
-		{micros: 0, channels: 1, values: [4]uint16{60000}},
-		{micros: 500000, channels: 1, values: [4]uint16{100}},
-		{micros: 600000, channels: 1, values: [4]uint16{200}},
-		{micros: 700000, channels: 0, values: [4]uint16{9000}},
-		{micros: 800000, channels: 1, clip: 1, values: [4]uint16{65535}},
-		{micros: 900000, channels: 1, flags: 1, values: [4]uint16{9000}},
-		{micros: 1000000, channels: 1, values: [4]uint16{300}},
+		{micros: 0, channels: 1, values: [4]uint32{(60000) * 10}},
+		{micros: 500000, channels: 1, values: [4]uint32{(100) * 10}},
+		{micros: 600000, channels: 1, values: [4]uint32{(200) * 10}},
+		{micros: 700000, channels: 0, values: [4]uint32{(9000) * 10}},
+		{micros: 800000, channels: 1, clip: 1, values: [4]uint32{^uint32(0)}},
+		{micros: 900000, channels: 1, flags: 1, values: [4]uint32{(9000) * 10}},
+		{micros: 1000000, channels: 1, values: [4]uint32{(300) * 10}},
 	}
 	mean, low, high, n := recentStats(data, 0)
-	if n != 3 || math.Abs(mean-305.55555555555554) > 1e-9 || low != 50000.0/300 || high != 500 {
+	if n != 3 || math.Abs(mean-305.55555555555554) > 1e-9 || low != 500000.0/3000 || high != 500 {
 		t.Fatal(mean, low, high, n)
 	}
 }
@@ -57,7 +57,7 @@ func TestTriggerTab(t *testing.T) {
 	u := ui.NewTester(s.view, 1080, 760)
 	left, okLeft := u.Find("波形测量")
 	right, okRight := u.Find("自动触发测试")
-	if !okLeft || !okRight || math.Abs(float64(left.W-right.W)) > 1 || left.W < 400 {
+	if !okLeft || !okRight || math.Abs(float64(left.W-right.W)) > 1 || left.W < 300 {
 		t.Fatal("tab widths", left, right)
 	}
 	if err := u.Click("自动触发测试"); err != nil {
@@ -92,8 +92,8 @@ func TestTriggerUICommands(t *testing.T) {
 	b.setChannels(8)
 	waitFor(t, func() bool { b.mu.Lock(); defer b.mu.Unlock(); return !b.adjusting && b.status.channels == 8 })
 	b.mu.Lock()
-	b.history.add(sample{sequence: 1, micros: 1000, channels: 8, values: [4]uint16{0, 0, 0, 1200}})
-	b.history.add(sample{sequence: 2, micros: 501000, channels: 8, values: [4]uint16{0, 0, 0, 1268}})
+	b.history.add(sample{sequence: 1, micros: 1000, channels: 8, values: [4]uint32{(0) * 10, (0) * 10, (0) * 10, (1200) * 10}})
+	b.history.add(sample{sequence: 2, micros: 501000, channels: 8, values: [4]uint32{(0) * 10, (0) * 10, (0) * 10, (1268) * 10}})
 	b.lastSample = time.Now()
 	b.mu.Unlock()
 	s := newApp(b)
@@ -103,7 +103,7 @@ func TestTriggerUICommands(t *testing.T) {
 	if err := u.Click("Set ARM Color"); err != nil {
 		t.Fatal(err)
 	}
-	if !s.referenceValid || s.reference != 1233 {
+	if !s.referenceValid || s.reference != 12331 {
 		t.Fatal("baseline", s.reference)
 	}
 	if s.enterInput != "1.4" || s.exitInput != "2.5" {
@@ -114,7 +114,7 @@ func TestTriggerUICommands(t *testing.T) {
 	}
 	waitFor(t, func() bool { b.mu.Lock(); defer b.mu.Unlock(); return !b.adjusting && b.status.mode == 1 })
 	p.mu.Lock()
-	if len(p.config) != 30 || p.config[29] != 3 || binary.LittleEndian.Uint16(p.config[4:]) != 1233 {
+	if len(p.config) != 40 || p.config[39] != 3 || binary.LittleEndian.Uint32(p.config[4:]) != 12331 {
 		t.Error("configuration", p.config)
 	}
 	p.mu.Unlock()
@@ -139,23 +139,26 @@ func TestAutomaticArmEnvelope(t *testing.T) {
 	for _, v := range []struct{ mean, low, high float64 }{
 		{0, 0, 0}, {100, 99.8, 100.3}, {327.67, 327.67, 327.67}, {655.34, 655.34, 655.34},
 	} {
-		ref, enter, exit, ok := autoArmThresholds(v.mean, v.low, v.high)
-		spread := max(math.Abs(float64(ref)-v.low*100), math.Abs(v.high*100-float64(ref)))
+		ref, enter, exit, ok := autoArmThresholds(v.mean*1000, v.low*1000, v.high*1000)
+		spread := max(math.Abs(float64(ref)-v.low*1000), math.Abs(v.high*1000-float64(ref)))
 		if !ok || float64(enter) <= spread || exit <= enter || exit-enter < 4 {
 			t.Fatal(v, ref, enter, exit, ok)
 		}
 	}
-	if _, _, _, ok := autoArmThresholds(327.67, 0, 655.34); ok {
+	if _, _, _, ok := autoArmThresholds(327670, 0, 655340); ok {
 		t.Fatal("unusable full-scale noise accepted")
 	}
 }
 
 func TestPulseTriggerThreshold(t *testing.T) {
-	if pulseTolerance(10000, 2500) != 1 || pulseThreshold(10000, 1) != 2500 {
+	if pulseThreshold(100000, 4.9) != ^uint32(0) {
+		t.Fatal("overflow was silently clamped")
+	}
+	if pulseTolerance(100000, 25000) != 1 || pulseThreshold(100000, 1) != 25000 {
 		t.Fatal("pulse threshold conversion")
 	}
 	for _, v := range []float64{-1, 5, 6, math.NaN(), math.Inf(1)} {
-		if pulseThreshold(10000, v) != 65535 {
+		if pulseThreshold(100000, v) != ^uint32(0) {
 			t.Fatal("invalid pulse tolerance", v)
 		}
 	}

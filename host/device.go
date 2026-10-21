@@ -13,7 +13,7 @@ import (
 	"go.bug.st/serial/enumerator"
 )
 
-type device struct{ path, label string }
+type device struct{ path, label, serial string }
 type port interface {
 	Read([]byte) (int, error)
 	Write([]byte) (int, error)
@@ -72,7 +72,7 @@ func (c *connection) request(kind byte, payload []byte) (frame, error) {
 		case <-c.done:
 			return frame{}, errors.New("设备已断开")
 		case <-timer.C:
-			return frame{}, errors.New("命令响应超时，请重新连接以确认设备状态")
+			return frame{}, errors.New("命令响应超时，请重新连接确认；若刚升级，请同时使用 v4 固件与上位机")
 		case f := <-c.replies:
 			if f.sequence != seq {
 				continue
@@ -94,6 +94,7 @@ func (c *connection) request(kind byte, payload []byte) (frame, error) {
 }
 
 type backend struct {
+	serial                        string
 	sampleDirty                   bool
 	lastSample                    time.Time
 	resetID                       uint64
@@ -127,7 +128,7 @@ func sensorDevices(ports []*enumerator.PortDetails) []device {
 	var ds []device
 	for _, p := range ports {
 		if p.IsUSB && strings.EqualFold(p.VID, "ACDC") && p.PID == "4015" {
-			ds = append(ds, device{p.Name, fmt.Sprintf("%s · %s", p.Name, p.SerialNumber)})
+			ds = append(ds, device{p.Name, fmt.Sprintf("%s · %s", p.Name, p.SerialNumber), p.SerialNumber})
 		}
 	}
 	return ds
@@ -165,6 +166,12 @@ func (b *backend) connect(path string) {
 	if b.conn != nil || b.state == "连接中" {
 		b.mu.Unlock()
 		return
+	}
+	b.serial = path
+	for _, d := range b.devices {
+		if d.path == path && d.serial != "" {
+			b.serial = d.serial
+		}
 	}
 	b.generation++
 	gen := b.generation
@@ -251,7 +258,7 @@ func (b *backend) getStatus(c *connection) (deviceStatus, error) {
 	}
 	s, ok := decodeStatus(f.payload)
 	if !ok {
-		return s, errors.New("设备状态或采样率与协议 v3 不兼容")
+		return s, errors.New("设备状态或采样率与协议 v4 不兼容，请同时升级固件与上位机")
 	}
 
 	uf, err := c.request(cmdUSBStatus, nil)
@@ -362,7 +369,7 @@ func (b *backend) setLow(value uint32) {
 	b.mu.Lock()
 	c := b.conn
 	if c == nil || b.state != "已连接" || b.adjusting || b.status.mode != 0 || b.status.state != 0 {
-		b.message = "阈值仅可在测量模式 WAIT 状态设置为 4000–600000 Hz"
+		b.message = "阈值仅可在测量模式 WAIT 状态设置为 100–600000 Hz"
 		b.dirty = true
 		b.mu.Unlock()
 		return
@@ -406,7 +413,7 @@ func (b *backend) setLow(value uint32) {
 		b.status = status
 		b.adjusting = false
 		// STATUS uses the same boot clock. Skip until 100ms after its snapshot, including queued old captures.
-		rawCutoff := uint32(status.uptime*1000) + 100000
+		rawCutoff := uint32(status.uptime*1000) + max(100000, 2*channelSlotUS(status.low)*4)
 		delta := int64(int32(rawCutoff - b.history.lastRaw))
 		b.discardUntil = uint64(max(int64(b.history.elapsed)+delta, 0))
 		b.resetID++
@@ -424,6 +431,7 @@ func (b *backend) mutate(run func(*connection) error) {
 		b.mu.Unlock()
 		return
 	}
+	beforeLow, beforeChannels := b.status.low, b.status.channels
 	b.adjusting, b.dirty = true, true
 	b.mu.Unlock()
 	go func() {
@@ -449,6 +457,13 @@ func (b *backend) mutate(run func(*connection) error) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		if b.conn == c {
+			if status.low != beforeLow || status.channels != beforeChannels {
+				b.history.head, b.history.size = 0, 0
+				rawCutoff := uint32(status.uptime*1000) + max(100000, 8*channelSlotUS(status.low))
+				delta := int64(int32(rawCutoff - b.history.lastRaw))
+				b.discardUntil = uint64(max(int64(b.history.elapsed)+delta, 0))
+				b.resetID++
+			}
 			b.status = status
 			b.adjusting, b.dirty = false, true
 		}
@@ -468,5 +483,27 @@ func (b *backend) test(config []byte, mode byte) {
 		}
 		_, err := c.request(cmdMode, []byte{mode})
 		return err
+	})
+}
+
+// Restore or temporarily switch acquisition as one serialized command sequence.
+func (b *backend) applyAcquisition(low uint32, channels byte) {
+	b.mutate(func(c *connection) error {
+		var p [4]byte
+		binary.LittleEndian.PutUint32(p[:], low)
+		if _, err := c.request(cmdLow, p[:]); err != nil {
+			return err
+		}
+		if _, err := c.request(cmdChannels, []byte{channels}); err != nil {
+			return err
+		}
+		status, err := b.getStatus(c)
+		if err != nil {
+			return err
+		}
+		if status.low != low || status.channels != channels {
+			return errors.New("采集设置回读不一致")
+		}
+		return nil
 	})
 }

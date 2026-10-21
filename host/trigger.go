@@ -10,21 +10,21 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func triggerConfig(low uint32, mask byte, reference uint16, enter, exit uint16, delay uint32) ([]byte, bool) {
-	if mask == 0 || mask > 15 || mask&(mask-1) != 0 || exit <= enter || delay > 1000 || reference == 65535 || low < lowMinHz || low > lowMaxHz {
+func triggerConfig(low uint32, mask byte, reference uint32, enter, exit uint32, delay uint32) ([]byte, bool) {
+	if mask == 0 || mask > 15 || mask&(mask-1) != 0 || exit <= enter || exit > 655340 || delay > 1000 || reference > 655340 || low < lowMinHz || low > lowMaxHz {
 		return nil, false
 	}
-	p := make([]byte, 30)
+	p := make([]byte, 40)
 	binary.LittleEndian.PutUint32(p, low)
-	binary.LittleEndian.PutUint16(p[4:], reference)
-	binary.LittleEndian.PutUint16(p[10:], enter)
-	binary.LittleEndian.PutUint16(p[12:], exit)
+	binary.LittleEndian.PutUint32(p[4:], reference)
+	binary.LittleEndian.PutUint32(p[16:], enter)
+	binary.LittleEndian.PutUint32(p[20:], exit)
 	// One valid sample confirms ARM/departure; no additional debounce latency.
-	binary.LittleEndian.PutUint32(p[18:], delay)
-	binary.LittleEndian.PutUint16(p[22:], 1)
-	p[24], p[27], p[28] = 2, 1, mask
-	for mask>>p[29] != 1 {
-		p[29]++
+	binary.LittleEndian.PutUint32(p[28:], delay)
+	binary.LittleEndian.PutUint16(p[32:], 1)
+	p[34], p[37], p[38] = 2, 1, mask
+	for mask>>p[39] != 1 {
+		p[39]++
 	}
 	return p, true
 }
@@ -54,7 +54,7 @@ func (s *app) testView(c *ui.Context, status deviceStatus, ready bool) {
 					s.live = b.history.copyTo(s.live)
 					last := s.live[len(s.live)-1]
 					mean, low, high, n := recentStats(s.live, int(ch))
-					reference, enter, exit, valid := autoArmThresholds(500/mean, 500/high, 500/low)
+					reference, enter, exit, valid := autoArmThresholds(500000/mean, 500000/high, 500000/low)
 					if last.channels == status.channels && last.clip&(1<<ch) == 0 && last.flags == 0 &&
 						last.micros-s.live[0].micros >= 500000 && n >= 2 && valid {
 						s.reference, s.referenceValid = reference, true
@@ -89,7 +89,7 @@ func (s *app) testView(c *ui.Context, status deviceStatus, ready bool) {
 		delay, e3 := strconv.ParseUint(s.delayInput, 10, 32)
 		enterRaw, exitRaw := pulseThreshold(s.reference, enter), pulseThreshold(s.reference, exit)
 		config, valid := triggerConfig(status.low, status.channels, s.reference, enterRaw, exitRaw, uint32(delay))
-		valid = valid && enterRaw != 65535 && exitRaw != 65535 && enter >= 0 && exit > enter && !math.IsNaN(enter) && !math.IsNaN(exit) && !math.IsInf(enter, 0) && !math.IsInf(exit, 0)
+		valid = valid && enterRaw <= 655340 && exitRaw <= 655340 && enter >= 0 && exit > enter && !math.IsNaN(enter) && !math.IsNaN(exit) && !math.IsInf(enter, 0) && !math.IsInf(exit, 0)
 		valid = valid && e1 == nil && e2 == nil && e3 == nil
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 			label := "Test"
@@ -146,31 +146,35 @@ func (s *app) testView(c *ui.Context, status deviceStatus, ready bool) {
 }
 
 // Use the observed envelope plus noise headroom, with a separate hysteresis gap.
-func autoArmThresholds(mean, low, high float64) (reference, enter, exit uint16, valid bool) {
-	if math.IsNaN(mean) || math.IsInf(mean, 0) || mean < 0 || low < 0 || high < mean || low > mean || high > 655.34 {
+func autoArmThresholds(mean, low, high float64) (reference, enter, exit uint32, valid bool) {
+	if math.IsNaN(mean) || math.IsInf(mean, 0) || mean < 0 || low < 0 || high < mean || low > mean || high > 655340 {
 		return 0, 0, 0, false
 	}
-	ref := uint32(math.Round(mean * 100))
-	minimum, maximum := uint32(math.Round(low*100)), uint32(math.Round(high*100))
+	ref := uint32(math.Round(mean))
+	minimum, maximum := uint32(math.Round(low)), uint32(math.Round(high))
 	spread := max(ref-minimum, maximum-ref)
-	margin := max(uint32(2), (spread+3)/4, (ref+199)/200)
+	margin := max(uint32(20), (spread+3)/4, (ref+199)/200)
 	tolerance := spread + margin
 	threshold := tolerance + max(spread, 2*margin)
-	if ref > 65534 || threshold > max(ref, 65534-ref) {
+	if ref > 655340 || threshold > max(ref, 655340-ref) {
 		return 0, 0, 0, false
 	}
-	return uint16(ref), uint16(tolerance), uint16(threshold), true
+	return ref, tolerance, threshold, true
 }
 
 // shortcut: firmware compares symmetric frequency distances; pulse tolerances
 // map to the shorter-pulse boundary until firmware supports pulse comparisons.
-func pulseTolerance(reference, distance uint16) float64 {
-	return pulseUS(reference) - 50000/(float64(reference)+float64(distance))
+func pulseTolerance(reference, distance uint32) float64 {
+	return pulseUS(reference) - 500000/(float64(reference)+float64(distance))
 }
-func pulseThreshold(reference uint16, tolerance float64) uint16 {
+func pulseThreshold(reference uint32, tolerance float64) uint32 {
 	width := pulseUS(reference)
 	if tolerance < 0 || tolerance >= width || math.IsNaN(width) || math.IsNaN(tolerance) || math.IsInf(tolerance, 0) {
-		return 65535
+		return ^uint32(0)
 	}
-	return uint16(min(65535, math.Round(50000/(width-tolerance)-float64(reference))))
+	value := math.Round(500000/(width-tolerance) - float64(reference))
+	if value > 655340 {
+		return ^uint32(0)
+	}
+	return uint32(value)
 }

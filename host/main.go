@@ -20,9 +20,19 @@ type plotCache struct {
 	key            string
 }
 type app struct {
+	calibration                                              *calibrationMap
+	calibrationRun                                           *calibrationRun
+	colorFormat                                              int
+	settingsPath, settingsError, savedSettings, resetConfirm string
+	settingsLoaded, settingsBlocked                          bool
+	prefs                                                    settings
+	restoredConnection                                       *connection
+	restoring                                                bool
+	restoreDeadline                                          time.Time
+
 	backend                           *backend
 	tab                               int
-	reference                         uint16
+	reference                         uint32
 	referenceValid                    bool
 	referenceChannel                  byte
 	referenceLow                      uint32
@@ -34,6 +44,7 @@ type app struct {
 	live, snapshot                    []sample
 	paused                            bool
 	refreshPaused                     atomic.Bool
+	calibrationActive                 atomic.Bool
 	end, span                         float64
 	hover                             float64
 	hoverFraction                     float64
@@ -184,7 +195,7 @@ func (s *app) view(c *ui.Context) {
 					return
 				case <-ticker.C:
 					s.backend.mu.Lock()
-					dirty := s.backend.dirty || s.backend.sampleDirty && !s.refreshPaused.Load()
+					dirty := s.calibrationActive.Load() || s.backend.dirty || s.backend.sampleDirty && !s.refreshPaused.Load()
 					s.backend.dirty = false
 					s.backend.sampleDirty = false
 					s.backend.mu.Unlock()
@@ -200,6 +211,7 @@ func (s *app) view(c *ui.Context) {
 	devices := slices.Clone(b.devices)
 	state, message := b.state, b.message
 	status := b.status
+	conn, serial := b.conn, b.serial
 	usb := b.usb
 	busy, enumerating := b.adjusting, b.enumerating
 	errors, drops := b.parserErrors, b.history.drops
@@ -219,6 +231,9 @@ func (s *app) view(c *ui.Context) {
 		s.live = b.history.copyTo(s.live)
 	}
 	b.mu.Unlock()
+	s.syncPreferences(status, state, busy, conn)
+	s.advanceCalibration(status, state, busy, serial)
+	s.calibrationActive.Store(s.calibrationRun != nil || s.restoring)
 	if !s.inputInitialized && status.low != 0 {
 		s.lowInput = strconv.FormatUint(uint64(status.low), 10)
 		s.inputInitialized = true
@@ -278,23 +293,23 @@ func (s *app) view(c *ui.Context) {
 			}
 			ui.Box(c).Grow(1)
 			ui.Text(c, "低频阈值 / Hz").TextColor(s.theme.TextMuted)
-			input := ui.TextInput(c, &s.lowInput).Width(100).Label("低频阈值，4000 到 600000 Hz").Tooltip("离开输入框或应用时自动限制到 4000–600000 Hz").Disabled(state != "已连接" || busy)
+			input := ui.TextInput(c, &s.lowInput).Width(100).Label("低频阈值，100 到 600000 Hz").Tooltip("离开输入框或应用时自动限制到 100–600000 Hz").Disabled(state != "已连接" || busy || s.calibrationRun != nil || s.restoring)
 			focused := input.Focused()
 			if s.lowFocused && !focused {
 				s.lowInput = strconv.FormatUint(uint64(clampedLowInput(s.lowInput, status.low)), 10)
 			}
 			s.lowFocused = focused
-			if ui.Button(c, "应用").Disabled(state != "已连接" || busy || status.mode != 0 || status.state != 0).Tooltip("范围 4000–600000 Hz；应用后已有测试配置失效").Clicked() {
+			if ui.Button(c, "应用").Disabled(state != "已连接" || busy || s.calibrationRun != nil || s.restoring || status.mode != 0 || status.state != 0).Tooltip("范围 100–600000 Hz；应用后已有测试配置失效").Clicked() {
 				v := clampedLowInput(s.lowInput, status.low)
 				s.lowInput = strconv.FormatUint(uint64(v), 10)
 				b.setLow(v)
 			}
 		})
 		previousTab := s.tab
-		tabs := ui.TabsBase(c, &s.tab, 2)
+		tabs := ui.TabsBase(c, &s.tab, 3)
 		tabs.List.Gap(4).Padding(4).Background(s.theme.Surface).Border(1, s.theme.Border).Radius(8).Children(func() {
-			for i, name := range []string{"波形测量", "自动触发测试"} {
-				tab := tabs.Tab(i).Label(name).Grow(1).Basis(0).MinWidth(0).Height(36).Center().Radius(5)
+			for i, name := range []string{"波形测量", "自动触发测试", "屏幕颜色校准"} {
+				tab := tabs.Tab(i).Disabled(s.calibrationRun != nil).Label(name).Grow(1).Basis(0).MinWidth(0).Height(36).Center().Radius(5)
 				color := s.theme.TextMuted
 				if i == s.tab {
 					tab.Background(s.theme.Accent)
@@ -314,7 +329,7 @@ func (s *app) view(c *ui.Context) {
 			for ch, name := range []string{"R", "G", "B", "Clear"} {
 				enabled := status.channels&(1<<ch) != 0
 				before := enabled
-				ui.Checkbox(c, &enabled, name).Disabled(state != "已连接" || busy || status.mode != 0 || status.state != 0 || s.demo)
+				ui.Checkbox(c, &enabled, name).Disabled(state != "已连接" || busy || s.calibrationRun != nil || s.restoring || status.mode != 0 || status.state != 0 || s.demo)
 				if enabled != before {
 					b.setChannels(status.channels ^ (1 << ch))
 					s.referenceValid = false
@@ -322,7 +337,9 @@ func (s *app) view(c *ui.Context) {
 			}
 			ui.Text(c, "少开通道可提高采样率；降低低频阈值可扩大动态范围").FontSize(12).TextColor(s.theme.TextMuted)
 		})
-		if s.tab == 1 {
+		if s.tab == 2 {
+			s.calibrationView(c, status, state == "已连接" && !busy && !s.restoring, serial)
+		} else if s.tab == 1 {
 			s.testView(c, status, state == "已连接" && !busy && !s.demo)
 		} else {
 
@@ -347,7 +364,11 @@ func (s *app) view(c *ui.Context) {
 				}
 				ui.Textf(c, "%s · %.3g s", mode, s.span/1e6).TextColor(s.theme.Accent)
 				ui.Box(c).Grow(1)
-				ui.Text(c, "滚轮缩放 · 拖动平移 · +/- 缩放 · ←/→ 平移 · Esc 实时").FontSize(12).TextColor(s.theme.TextMuted)
+				if s.calibrationUsable() {
+					s.measuredColor(c, serial)
+				} else {
+					ui.Text(c, "滚轮缩放 · 拖动平移 · +/- 缩放 · ←/→ 平移 · Esc 实时").FontSize(12).TextColor(s.theme.TextMuted)
+				}
 			})
 			ui.Grid(c).ColumnTracks(ui.Fr(1), ui.Fr(1)).RowTracks(ui.Fr(1), ui.Fr(1)).Grow(1).MinHeight(400).Gap(12).Children(func() {
 				for ch := range 4 {
@@ -358,6 +379,9 @@ func (s *app) view(c *ui.Context) {
 					}
 				}
 			})
+		}
+		if s.settingsError != "" {
+			ui.Text(c, s.settingsError).FontSize(12).TextColor(s.theme.Danger)
 		}
 		ui.Text(c, message+" · "+usb.text()).TextColor(func() ui.Color {
 			if state == "异常" {
@@ -372,6 +396,32 @@ func (s *app) view(c *ui.Context) {
 		ui.Textf(c, "采样丢组 %d · 设备采集丢组 %d · 发送丢组 %d · 解码错误 %d · 设备协议错误 %d · 阈值 %s", drops, status.captureDrops, status.streamDrops, errors, status.parserErrors, threshold).FontSize(12).TextColor(s.theme.TextMuted)
 	})
 }
+
+// LOW marks a bound, not an exact pulse width. Never bridge missing samples.
+func lowSpans(data []sample, ch int, lo, hi float64) []chart.Span {
+	var spans []chart.Span
+	for i := 0; i < len(data); i++ {
+		v := data[i]
+		if v.channels&(1<<ch) == 0 || v.low&(1<<ch) == 0 {
+			continue
+		}
+		start, end := float64(v.micros), float64(v.micros)
+		for i+1 < len(data) && data[i+1].sequence-data[i].sequence == 1 && data[i+1].micros > data[i].micros {
+			next := data[i+1]
+			end = float64(next.micros)
+			if next.channels&(1<<ch) == 0 || next.low&(1<<ch) == 0 {
+				break
+			}
+			i++
+		}
+		if end < lo || start > hi {
+			continue
+		}
+		spans = append(spans, chart.Span{Lo: float32((max(lo, start) - lo) / (hi - lo)), Hi: float32((min(hi, end) - lo) / (hi - lo))})
+	}
+	return spans
+}
+
 func (s *app) plot(c *ui.Context, ch int) {
 	names := [4]string{"R · 红通道", "G · 绿通道", "B · 蓝通道", "Clear · 透明通道"}
 	colors := [4]ui.Color{ui.Hex("#ff9db1"), ui.Hex("#8bd5a3"), ui.Hex("#8bbdf0"), ui.Hex("#d3b1f4")}
@@ -385,17 +435,37 @@ func (s *app) plot(c *ui.Context, ch int) {
 	if len(data) > 0 {
 		last = data[len(data)-1]
 	}
-	maxY := float64(1)
+	s.backend.mu.Lock()
+	lowHz := s.backend.status.low
+	s.backend.mu.Unlock()
+	lowPulse := pulseUS(lowHz)
+	lowRanges := lowSpans(data, ch, lo, hi)
+	minY, maxY := math.Inf(1), float64(0)
 	for _, v := range data {
-		if v.channels&(1<<ch) != 0 && float64(v.micros) >= lo && float64(v.micros) <= hi {
+		if v.channels&(1<<ch) != 0 && v.low&(1<<ch) == 0 && float64(v.micros) >= lo && float64(v.micros) <= hi {
 			if v := pulseUS(v.values[ch]); !math.IsNaN(v) {
-				maxY = max(maxY, v)
+				minY, maxY = min(minY, v), max(maxY, v)
 			}
 		}
 	}
-	yscale := chart.NewLinear(0, maxY*1.08).Nice(4)
+	if len(lowRanges) > 0 && !math.IsNaN(lowPulse) {
+		minY, maxY = min(minY, lowPulse), max(maxY, lowPulse)
+	}
+	if maxY == 0 {
+		minY, maxY = 0.5, 5000
+	}
+	logMin, logMax := math.Log10(minY), math.Log10(maxY)
+	padding := max(0.1, (logMax-logMin)*0.08)
+	yscale := chart.NewLinear(logMax+padding, logMin-padding)
+	yscale.Format = func(v float64) string { return fmt.Sprintf("%.2g", math.Pow(10, v)) }
 	xticks := chart.NewLinear(-s.span/1e6, 0).Ticks(5)
-	ui.Column(c).Padding(14).Gap(8).Background(s.theme.Surface).Radius(8).Children(func() {
+	plotGap := float32(8)
+	plotMinimum := float32(120)
+	if s.calibrationUsable() {
+		plotGap = 6
+		plotMinimum = 90
+	}
+	ui.Column(c).Padding(14).Gap(plotGap).Background(s.theme.Surface).Radius(8).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
 			ui.Text(c, names[ch]).TextColor(colors[ch]).Bold()
 			ui.Box(c).Grow(1)
@@ -418,9 +488,10 @@ func (s *app) plot(c *ui.Context, ch int) {
 			}
 			ui.Text(c, flags).FontSize(12).TextColor(s.theme.Warning)
 		})
+		s.channelResponse(c, last, ch, colors[ch])
 		var statsText = "悬停查看时间桶与样本数\nMax / Min / 中位数 · μs"
 		chart.Plot(c, chart.Axes{Left: yscale.Ticks(4), Bottom: xticks}, func(area ui.Element) {
-			area.Label(names[ch] + "，单位 μs").Description("最近十秒；滚轮缩放，拖动平移，方向键浏览").Focusable()
+			area.Label(names[ch] + "，单位 μs").Description("对数脉宽，上方光线更强；最近十秒；滚轮缩放，拖动平移，方向键浏览").Focusable()
 			area.HandleInput(func(ev ui.InputEvent) bool { return s.input(ev, s.plotWidths[ch], ch) })
 			pointerX, pointerY, over := area.PointerPosition()
 			if !over && s.hoverChannel == ch && s.hovering {
@@ -469,7 +540,7 @@ func (s *app) plot(c *ui.Context, ch int) {
 					x := chart.X(r, tick.At)
 					p.Line(x, r.Y, x, r.Y+r.H, 1, ui.Hex("#303030"))
 				}
-				key := fmt.Sprintf("%d/%d/%d/%f/%f/%f/%d", s.epoch, len(data), last.sequence, lo, hi, maxY, pixels)
+				key := fmt.Sprintf("%d/%d/%d/%f/%f/%f/%f/%d", s.epoch, len(data), last.sequence, lo, hi, minY, maxY, pixels)
 				if pc.key != key {
 					pc.key = key
 					pc.xs, pc.ys = pc.xs[:0], pc.ys[:0]
@@ -485,8 +556,8 @@ func (s *app) plot(c *ui.Context, ch int) {
 							pc.ys = append(pc.ys, float32(math.NaN()))
 						}
 						pc.xs = append(pc.xs, x)
-						y := yscale.At(pulseUS(v.values[ch]))
-						if v.channels&(1<<ch) == 0 {
+						y := yscale.At(math.Log10(pulseUS(v.values[ch])))
+						if v.channels&(1<<ch) == 0 || v.low&(1<<ch) != 0 {
 							y = float32(math.NaN())
 						}
 						pc.ys = append(pc.ys, y)
@@ -503,6 +574,18 @@ func (s *app) plot(c *ui.Context, ch int) {
 						xs, ys = pc.xs, pc.ys
 					}
 					p.StrokePath(chart.Line(r, xs, ys, chart.CurveLinear), 1.5, colors[ch])
+					if !math.IsNaN(lowPulse) {
+						y := chart.Y(r, yscale.At(math.Log10(lowPulse)))
+						for _, span := range lowRanges {
+							x, end := chart.X(r, span.Lo), chart.X(r, span.Hi)
+							// Keep an isolated LOW sample visible at any zoom level.
+							end = min(r.X+r.W, max(end, x+6))
+							x = min(x, end-6)
+							for ; x < end; x += 10 {
+								p.Line(x, y, min(x+6, end), y, 2, ui.Hex("#ff5c5c"))
+							}
+						}
+					}
 					if s.hovering && s.hover >= lo && s.hover <= hi {
 						cursor := s.hover
 						if drawRaw {
@@ -523,7 +606,7 @@ func (s *app) plot(c *ui.Context, ch int) {
 						if over && s.hovering && s.hoverChannel == ch {
 							v := data[nearest]
 							x := chart.X(r, float32((float64(v.micros)-lo)/s.span))
-							y := chart.Y(r, yscale.At(pulseUS(v.values[ch])))
+							y := chart.Y(r, yscale.At(math.Log10(pulseUS(v.values[ch]))))
 							if math.Hypot(float64(pointerX-(x-r.X)), float64(pointerY-(y-r.Y))) <= 6 {
 								p.FillPath(new(ui.Path).Circle(x, y, 3), colors[ch])
 							}
@@ -537,7 +620,10 @@ func (s *app) plot(c *ui.Context, ch int) {
 					ui.Text(c, "枚举设备 → 选择 → 连接").FontSize(12).TextColor(s.theme.TextMuted)
 				})
 			}
-		}).Grow(1).MinHeight(120).Gap(6)
+		}).Grow(1).MinHeight(plotMinimum).Gap(6)
+		if len(lowRanges) > 0 && !s.hovering {
+			statsText = fmt.Sprintf("红色虚线：光强低于量程下限\n脉宽 > %.1f μs，非精确测量值", lowPulse)
+		}
 		ui.Text(c, statsText).FontSize(12).TextColor(s.theme.TextMuted).MinHeight(36)
 	})
 }
@@ -547,15 +633,23 @@ func main() {
 	flag.Parse()
 	b := newBackend()
 	s := newApp(b)
+	if !*demo {
+		s.loadSettings()
+	}
 	if *demo {
 		s.demo = true
 		b.state = "合成演示"
 		startDemo(b, s.stop)
 	}
 	mygo.App.WhenReady(func() {
-		mygo.NewWindow(mygo.WindowOptions{Title: "TCS3200 测量台", Width: 1280, Height: 900, MinWidth: 1080, MinHeight: 760, Content: ui.View(s.view)})
+		width, height := 1280, 900
+		if s.settingsLoaded {
+			width, height = s.prefs.Width, s.prefs.Height
+		}
+		w := mygo.NewWindow(mygo.WindowOptions{Title: "TCS3200 测量台", Width: width, Height: height, MinWidth: 1080, MinHeight: 760, Content: ui.View(s.view)})
+		w.OnResize(func() { s.prefs.Width, s.prefs.Height = w.Size(); _ = s.savePreferences() })
 	})
-	mygo.App.OnQuit(func() { close(s.stop); b.disconnect() })
+	mygo.App.OnQuit(func() { _ = s.savePreferences(); close(s.stop); b.disconnect() })
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
@@ -584,7 +678,7 @@ func startDemo(b *backend, stop <-chan struct{}) {
 						if seq%997 == uint32(ch*31) {
 							value += 6000
 						}
-						v.values[ch] = uint16(value)
+						v.values[ch] = uint32(value)
 					}
 					b.history.add(v)
 				}

@@ -1,6 +1,6 @@
 # TCS3200 Sensor Kit
 
-RP2040-Zero 测量屏幕颜色：PIO 测周期，RGB+C 独立开关，根据低频阈值与启用通道数以 240～4000 Hz（全关为 0） 计划组频率采样，CDC bulk 传输；同一固件可配置 ARM 颜色，偏离后延迟发送键盘或鼠标按钮。
+RP2040-Zero 测量屏幕颜色：PIO 测周期，RGB+C 独立开关，根据低频阈值与启用通道数以 6～4000 Hz（全关为 0） 计划组频率采样，CDC bulk 传输；同一固件可配置 ARM 颜色，偏离后延迟发送键盘或鼠标按钮。
 
 | 目录 | 内容 |
 |---|---|
@@ -17,9 +17,9 @@ make       # 使用 xianii/pico-sdk:2.3.0 Docker 镜像编译
 make test  # 主机 C 自检（ASan/UBSan）及 PIO 时序模拟；需要 cc 和 Python 3
 ```
 
-输出：`firmware/build/src/tcs3200_sensor.uf2`。按住 BOOT 接入 USB，复制 UF2 到引导盘。详细接线与验证见 [固件说明](firmware/README.md)，上位机开发以 [协议 v3](docs/protocol.md) 为准。
+输出：`firmware/build/src/tcs3200_sensor.uf2`。按住 BOOT 接入 USB，复制 UF2 到引导盘。详细接线与验证见 [固件说明](firmware/README.md)，上位机开发以 [协议 v4](docs/protocol.md) 为准。
 
-软件自检与交叉编译不代替硬件验证。240～4000 Hz（全关为 0） 是随低频阈值变化的最大计划组频率，低频/超时通道置零；屏幕 PWM、刷新与各通道时间偏移可能影响颜色判定。
+软件自检与交叉编译不代替硬件验证。6～4000 Hz（全关为 0） 是随低频阈值变化的最大计划组频率，低频/超时通道置零；屏幕 PWM、刷新与各通道时间偏移可能影响颜色判定。
 
 ## Linux 上位机
 
@@ -30,4 +30,4 @@ make host-build    # host/build/tcs3200-host
 make host-test     # 上位机测试和 vet
 ```
 
-需要 Go 1.27.1+、GTK 3 与 OpenGL。支持四通道最近 10 秒、X 轴缩放、暂停快照、像素桶 Max/Min/中位数及低频阈值自动限幅（4000～600000 Hz）和最大采样率显示。详见 [上位机说明](host/README.md)，包括串口权限、临时 Min/Max 优化和后续上游迁移。
+需要 Go 1.27.1+、GTK 3 与 OpenGL。支持四通道最近 10 秒、X 轴缩放、暂停快照、像素桶 Max/Min/中位数及低频阈值自动限幅（100～600000 Hz）和最大采样率显示。详见 [上位机说明](host/README.md)，包括串口权限、临时 Min/Max 优化和后续上游迁移。

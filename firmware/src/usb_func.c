@@ -214,13 +214,13 @@ void usb_sample(const sample_t *s) {
     wire_put32(payload, s->sequence);
     wire_put32(payload + 4, s->timestamp_us);
     for (unsigned i = 0; i < 4; ++i)
-        wire_put16(payload + 8 + 2 * i, s->value[i]);
-    payload[16] = s->low_mask;
-    payload[17] = s->clip_mask;
-    payload[18] = app.mode;
-    payload[19] = app.state;
-    payload[20] = s->flags;
-    payload[21] = s->channels;
+        wire_put32(payload + 8 + 4 * i, s->value[i]);
+    payload[24] = s->low_mask;
+    payload[25] = s->clip_mask;
+    payload[26] = app.mode;
+    payload[27] = app.state;
+    payload[28] = s->flags;
+    payload[29] = s->channels;
     send_frame(MSG_SAMPLE, (uint16_t)s->sequence, payload, sizeof(payload));
 }
 static void disconnected(void) {

@@ -81,48 +81,48 @@ void protocol_feed(protocol_parser_t *p, const uint8_t *data, size_t length,
 }
 void config_decode(test_config_t *c, const uint8_t p[CONFIG_SIZE]) {
     c->low_hz = wire_u32(p);
+    c->enter_tolerance = wire_u32(p + 16);
+    c->exit_threshold = wire_u32(p + 20);
+    c->arm_ms = wire_u16(p + 24);
+    c->depart_ms = wire_u16(p + 26);
+    c->delay_ms = wire_u32(p + 28);
+    c->hold_ms = wire_u16(p + 32);
     for (unsigned i = 0; i < 3; ++i)
-        c->reference[i] = wire_u16(p + 4 + 2 * i);
-    c->enter_tolerance = wire_u16(p + 10);
-    c->exit_threshold = wire_u16(p + 12);
-    c->arm_ms = wire_u16(p + 14);
-    c->depart_ms = wire_u16(p + 16);
-    c->delay_ms = wire_u32(p + 18);
-    c->hold_ms = wire_u16(p + 22);
-    c->action = p[24];
-    c->modifiers = p[25];
-    c->keycode = p[26];
-    c->mouse_buttons = p[27];
-    c->channels = p[28];
-    c->channel = p[29];
+        c->reference[i] = wire_u32(p + 4 + 4 * i);
+    c->action = p[34];
+    c->modifiers = p[35];
+    c->keycode = p[36];
+    c->mouse_buttons = p[37];
+    c->channels = p[38];
+    c->channel = p[39];
 }
 void config_encode(uint8_t p[CONFIG_SIZE], const test_config_t *c) {
     wire_put32(p, c->low_hz);
+    wire_put32(p + 16, c->enter_tolerance);
+    wire_put32(p + 20, c->exit_threshold);
+    wire_put16(p + 24, c->arm_ms);
+    wire_put16(p + 26, c->depart_ms);
+    wire_put32(p + 28, c->delay_ms);
+    wire_put16(p + 32, c->hold_ms);
     for (unsigned i = 0; i < 3; ++i)
-        wire_put16(p + 4 + 2 * i, c->reference[i]);
-    wire_put16(p + 10, c->enter_tolerance);
-    wire_put16(p + 12, c->exit_threshold);
-    wire_put16(p + 14, c->arm_ms);
-    wire_put16(p + 16, c->depart_ms);
-    wire_put32(p + 18, c->delay_ms);
-    wire_put16(p + 22, c->hold_ms);
-    p[24] = c->action;
-    p[25] = c->modifiers;
-    p[26] = c->keycode;
-    p[27] = c->mouse_buttons;
-    p[28] = c->channels;
-    p[29] = c->channel;
+        wire_put32(p + 4 + 4 * i, c->reference[i]);
+    p[34] = c->action;
+    p[35] = c->modifiers;
+    p[36] = c->keycode;
+    p[37] = c->mouse_buttons;
+    p[38] = c->channels;
+    p[39] = c->channel;
 }
 bool config_valid(const test_config_t *c) {
     if (!c->channels || c->channels > 15 || c->channel > 3 || !(c->channels & (1u << c->channel)))
         return false;
     if (c->low_hz < SENSOR_LOW_MIN_HZ || c->low_hz > SENSOR_LOW_MAX_HZ ||
-        c->exit_threshold <= c->enter_tolerance || c->arm_ms > 60000 ||
+        c->exit_threshold > 655340u || c->exit_threshold <= c->enter_tolerance || c->arm_ms > 60000 ||
         c->depart_ms > 60000 || c->delay_ms > 1000 ||
         !c->hold_ms || c->hold_ms > 60000)
         return false;
     for (unsigned i = 0; i < 3; ++i)
-        if (c->reference[i] == UINT16_MAX)
+        if (c->reference[i] > 655340u)
             return false;
     if (c->action == ACTION_KEYBOARD)
         return c->keycode >= 4 && c->keycode <= 0xdf && !c->mouse_buttons;
@@ -142,20 +142,20 @@ uint32_t sample_period_us(uint32_t low_hz) {
 uint16_t sample_rate_hz(uint32_t low_hz) {
     return (uint16_t)(1000000u / sample_period_us(low_hz));
 }
-uint16_t sample_frequency(uint32_t counts, uint32_t clock_hz, uint32_t low_hz,
+uint32_t sample_frequency(uint32_t counts, uint32_t clock_hz, uint32_t low_hz,
                           bool *low, bool *clipped) {
     *clipped = false;
     *low = true;
     if (!counts || counts > UINT32_MAX / 3u)
         return 0;
     uint32_t cycles = counts * 3u - 1u;
-    uint32_t hz = clock_hz / cycles;
+    // Round before thresholding so PIO tick error does not turn nominal 100 Hz into 99 Hz.
+    uint32_t hz = (uint32_t)(((uint64_t)clock_hz + cycles / 2u) / cycles);
     if (hz < low_hz)
         return 0;
     *low = false;
-    uint32_t value = (hz + 5u) / 10u;
-    *clipped = value > UINT16_MAX;
-    return *clipped ? UINT16_MAX : (uint16_t)value;
+    *clipped = hz > 655340u;
+    return *clipped ? UINT32_MAX : hz;
 }
 
 uint32_t sample_mask_period_us(uint32_t low_hz, uint8_t channels) {

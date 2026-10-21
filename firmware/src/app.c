@@ -54,8 +54,8 @@ void app_sample(app_t *a, const sample_t *s) {
     }
     a->last_sample_us = s->timestamp_us;
     // shortcut: LOW is zero; add a presence input if black must differ from disconnection.
-    int difference = (int)s->value[a->config.channel] - a->config.reference[0];
-    uint16_t distance = (uint16_t)(difference < 0 ? -difference : difference);
+    int64_t difference = (int64_t)s->value[a->config.channel] - a->config.reference[0];
+    uint32_t distance = (uint32_t)(difference < 0 ? -difference : difference);
     bool qualifies = a->state == STATE_WAIT ? distance <= a->config.enter_tolerance
                                             : distance >= a->config.exit_threshold;
     if (!qualifies) {

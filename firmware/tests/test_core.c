@@ -17,7 +17,7 @@ static void receive(uint8_t type, uint16_t sequence, const uint8_t *payload,
 static void test_protocol(void) {
     assert(protocol_crc((const uint8_t *)"123456789", 9) == 0x29b1);
     uint8_t frame[PROTOCOL_MAX_FRAME];
-    const uint8_t status_vector[] = {0x54, 0x43, 3, 1, 1, 0, 0, 0, 0x15, 0x1c};
+    const uint8_t status_vector[] = {0x54, 0x43, 4, 1, 1, 0, 0, 0, 0x54, 0xd4};
     assert(protocol_encode(frame, CMD_STATUS, 1, NULL, 0) == sizeof(status_vector));
     assert(!memcmp(frame, status_vector, sizeof(status_vector)));
     protocol_parser_t p = {0};
@@ -194,14 +194,19 @@ static void test_app(void) {
 }
 static void test_frequency(void) {
     bool low, clipped;
-    assert(sample_frequency(2500, 125000000, 15000, &low, &clipped) == 1667);
+    assert(sample_frequency(2500, 125000000, 15000, &low, &clipped) == 16669);
     assert(!low && !clipped);
     assert(!sample_frequency(2500, 125000000, 20000, &low, &clipped) && low);
     assert(!sample_frequency(0, 125000000, 15000, &low, &clipped) && low);
     assert(!sample_frequency(UINT32_MAX, 125000000, 15000, &low, &clipped));
-    assert(sample_frequency(1, 125000000, 15000, &low, &clipped) == UINT16_MAX && clipped);
+    assert(sample_frequency(1, 125000000, 15000, &low, &clipped) == UINT32_MAX && clipped);
 }
 static void test_adaptive_sampling(void) {
+ assert(sample_channel_slot_us(100)==40040 && sample_rate_hz(100)==6);
+ bool low,clip;
+ assert(sample_frequency(416668,125000000,100,&low,&clip)==100 && !low && !clip);
+ assert(sample_frequency(416667,125000000,100,&low,&clip)==100 && !low && !clip);
+ assert(!sample_frequency(420876,125000000,100,&low,&clip) && low);
     assert(sample_channel_slot_us(4000) == 1040 && sample_rate_hz(4000) == 240);
     assert(sample_channel_slot_us(10000) == 440 && sample_rate_hz(10000) == 568);
     assert(sample_channel_slot_us(15000) == 307 && sample_rate_hz(15000) == 814);
@@ -209,8 +214,8 @@ static void test_adaptive_sampling(void) {
     uint32_t previous = 0;
     for (uint32_t low = SENSOR_LOW_MIN_HZ; low <= SENSOR_LOW_MAX_HZ; ++low) {
         uint32_t rate = sample_rate_hz(low);
-        assert(rate >= 240 && rate <= 1000 && rate >= previous);
-        assert(sample_period_us(low) <= 1000000u / 240u);
+        assert(rate >= 6 && rate <= 1000 && rate >= previous);
+        assert(sample_period_us(low) <= 160160u);
         previous = rate;
     }
     test_config_t c = config();

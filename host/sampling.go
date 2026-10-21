@@ -7,13 +7,13 @@ import (
 )
 
 const (
-	lowMinHz        = uint32(4000)
+	lowMinHz        = uint32(100)
 	lowMaxHz        = uint32(600000)
 	defaultLowHz    = uint32(15000)
-	protocolVersion = byte(3)
+	protocolVersion = byte(4)
 )
 
-// Keep the timing budget in sync with firmware/src/protocol.c and protocol v3.
+// Keep the timing budget in sync with firmware/src/protocol.c and protocol v4.
 func channelSlotUS(low uint32) uint32 {
 	low = max(lowMinHz, min(lowMaxHz, low))
 	return max(250, (4_000_000+low-1)/low+40)

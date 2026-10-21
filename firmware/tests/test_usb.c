@@ -165,7 +165,7 @@ int main(void) {
     request(CMD_CHANNELS, &invalid_mask, 1);
     collect();
     assert(last_payload[1] == RESULT_VALUE && sensor_channels == 15);
-    wire_put32(low, 3999);
+    wire_put32(low, 99);
     request(CMD_LOW, low, 4);
     collect();
     assert(sensor_low_hz == 4000 && last_payload[1] == RESULT_VALUE);

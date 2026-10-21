@@ -4,17 +4,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PROTOCOL_VERSION 3u
+#define PROTOCOL_VERSION 4u
 #define PROTOCOL_MAX_PAYLOAD 64u
 #define PROTOCOL_OVERHEAD 10u
 #define PROTOCOL_MAX_FRAME (PROTOCOL_MAX_PAYLOAD + PROTOCOL_OVERHEAD)
-#define SENSOR_LOW_MIN_HZ 4000u
+#define SENSOR_LOW_MIN_HZ 100u
 #define SENSOR_LOW_MAX_HZ 600000u
 #define SENSOR_MIN_SLOT_US 250u
 #define SENSOR_SLOT_OVERHEAD_US 40u
 #define SENSOR_PERIODS_PER_SLOT 4u
-#define CONFIG_SIZE 30u
-#define SAMPLE_SIZE 22u
+#define CONFIG_SIZE 40u
+#define SAMPLE_SIZE 30u
 
 enum {
     CMD_STATUS = 0x01, CMD_MODE = 0x02, CMD_CONFIG = 0x03,
@@ -29,15 +29,15 @@ enum { SAMPLE_LATE = 1 };
 
 typedef struct {
     uint32_t low_hz;
-    uint16_t reference[3];
-    uint16_t enter_tolerance, exit_threshold, arm_ms, depart_ms;
+    uint32_t reference[3], enter_tolerance, exit_threshold;
+    uint16_t arm_ms, depart_ms;
     uint32_t delay_ms;
     uint16_t hold_ms;
     uint8_t action, modifiers, keycode, mouse_buttons, channels, channel;
 } test_config_t;
 typedef struct {
     uint32_t sequence, timestamp_us;
-    uint16_t value[4];
+    uint32_t value[4];
     uint8_t low_mask, clip_mask, flags, channels;
     uint32_t detected_us;
 } sample_t;
@@ -66,6 +66,6 @@ uint32_t sample_period_us(uint32_t low_hz);
 uint32_t sample_mask_period_us(uint32_t low_hz, uint8_t channels);
 uint16_t sample_mask_rate_hz(uint32_t low_hz, uint8_t channels);
 uint16_t sample_rate_hz(uint32_t low_hz);
-uint16_t sample_frequency(uint32_t counts, uint32_t clock_hz, uint32_t low_hz,
+uint32_t sample_frequency(uint32_t counts, uint32_t clock_hz, uint32_t low_hz,
                           bool *low, bool *clipped);
 #endif

@@ -69,7 +69,7 @@ print("PIO full-period counting, phase/duty variation and no-edge deadlines pass
 # Model the longest documented filter response (one new period + 1us),
 # arbitrary new phase/duty, and the exact dynamic channel cutoff.
 clock = 125_000_000
-for low in (4000, 5000, 10000, 15000, 19047, 19048, 600000):
+for low in (100, 101, 1000, 4000, 5000, 10000, 15000, 19047, 19048, 600000):
     slot = max(250, (4_000_000 + low - 1) // low + 40)
     budget = (slot - 10 - 1) * (clock // 1_000_000)
     period = (clock + low - 1) // low
