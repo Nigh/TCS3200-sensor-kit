@@ -129,7 +129,7 @@ Gently rounded controls and measurement panels share the radius tokens. Plot geo
 
 ### Native controls
 
-Use MyGo `Button`, `PrimaryButton`, `Select` and `TextInput`. Connection is the pink primary action; enumeration, disconnect, apply, pause and return-to-live use standard buttons. Preserve framework hover, keyboard focus and disabled states rather than inventing parallel styling. The selector and threshold field retain their accessible labels. Threshold edits normalize on blur or apply, within 4000–600000 Hz; rate preview is distinguished from the device-applied maximum. Busy, disconnected and invalid-selection states disable the relevant controls.
+Use MyGo `Button`, `PrimaryButton`, `Select` and `TextInput`. Connection is the pink primary action; enumeration, disconnect, apply, pause and return-to-live use standard buttons. Preserve framework hover, keyboard focus and disabled states rather than inventing parallel styling. The selector and threshold field retain their accessible labels. Threshold edits normalize on blur or apply, within 100–600000 Hz; rate preview is distinguished from the device-applied maximum. Busy, disconnected and invalid-selection states disable the relevant controls.
 
 ### Measurement panel
 
@@ -167,4 +167,11 @@ When each occupied physical pixel column holds at most one enabled-channel sampl
 
 ### Workspace tabs
 
-The two workspace tabs use native `TabsBase` semantics with equal flex widths and a 36 DIP tab height. The strip has a surface background, 1 DIP border, 8 DIP radius and 4 DIP inset/gap. The selected tab has an accent fill and accent-text label; the inactive tab uses muted text and a border-color hover fill. Each tab has a 5 DIP radius. Keep native tab roles, keyboard selection and focus indicators.
+The three workspace tabs use native `TabsBase` semantics with equal flex widths and a 36 DIP tab height. The strip has a surface background, 1 DIP border, 8 DIP radius and 4 DIP inset/gap. The selected tab has an accent fill and accent-text label; the inactive tab uses muted text and a border-color hover fill. Each tab has a 5 DIP radius. Keep native tab roles, keyboard selection and focus indicators.
+
+
+### Screen calibration and calibrated readings
+
+The third tab preserves the native dark workspace. A 360 DIP unadorned square displays calibration colors; controls, four pulse readings, progress, failure and reset confirmation remain outside it. Disable tab and acquisition changes during a run. Use the existing native buttons and keyboard focus semantics.
+
+With a matching map, reserve a response row below each plot heading. Use an explicit percentage and channel/value label beside a flat channel-colored bar. The existing inspection row displays a 24 DIP color swatch and a keyboard-operable RGB/HEX/HSL format button. At the minimum window size, calibrated panels use a 90 DIP chart minimum and 6 DIP content gap to preserve the existing statistics strip; uncalibrated charts retain the 120 DIP minimum.

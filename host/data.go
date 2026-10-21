@@ -59,15 +59,15 @@ func (h *history) copyTo(dst []sample) []sample {
 	return dst
 }
 
-// TCS3200 has a 50% duty cycle; the wire value is in 10 Hz units.
+// TCS3200 has a 50% duty cycle; the wire value is in 1 Hz units.
 // LOW/zero and saturated readings have no finite, exact pulse width.
-func pulseUS(value uint16) float64 {
-	if value == 0 || value == 65535 {
+func pulseUS(value uint32) float64 {
+	if value == 0 || value == ^uint32(0) {
 		return math.NaN()
 	}
-	return 50000 / float64(value)
+	return 500000 / float64(value)
 }
-func pulseText(value uint16) string {
+func pulseText(value uint32) string {
 	if v := pulseUS(value); !math.IsNaN(v) {
 		return fmt.Sprintf("%.1f μs", v)
 	}

@@ -93,20 +93,24 @@ func (d *decoder) feed(data []byte, accept func(frame)) {
 type sample struct {
 	sequence                                uint32
 	micros                                  uint64
-	values                                  [4]uint16
+	values                                  [4]uint32
 	low, clip, mode, state, flags, channels byte
 }
 
 func decodeSample(f frame) (sample, bool) {
-	if len(f.payload) != 22 {
+	if len(f.payload) != 30 {
 		return sample{}, false
 	}
 	p := f.payload
-	s := sample{sequence: binary.LittleEndian.Uint32(p), micros: uint64(binary.LittleEndian.Uint32(p[4:])), low: p[16], clip: p[17], mode: p[18], state: p[19], flags: p[20], channels: p[21]}
+	s := sample{sequence: binary.LittleEndian.Uint32(p), micros: uint64(binary.LittleEndian.Uint32(p[4:])), low: p[24], clip: p[25], mode: p[26], state: p[27], flags: p[28], channels: p[29]}
 	for i := range 4 {
-		s.values[i] = binary.LittleEndian.Uint16(p[8+i*2:])
+		s.values[i] = binary.LittleEndian.Uint32(p[8+i*4:])
+		value, mask := s.values[i], byte(1<<i)
+		if value > 655340 && value != ^uint32(0) || value == ^uint32(0) && s.clip&mask == 0 || s.clip&mask != 0 && value != ^uint32(0) || s.low&mask != 0 && value != 0 || s.channels&mask == 0 && (value != 0 || (s.low|s.clip)&mask != 0) {
+			return sample{}, false
+		}
 	}
-	return s, f.sequence == uint16(s.sequence) && s.mode <= 2 && s.state <= 5 && s.low&0xf0 == 0 && s.clip&0xf0 == 0 && s.flags&^byte(1) == 0 && p[21] <= 15
+	return s, f.sequence == uint16(s.sequence) && s.mode <= 2 && s.state <= 5 && s.low&0xf0 == 0 && s.clip&0xf0 == 0 && s.flags&^byte(1) == 0 && p[29] <= 15
 }
 
 type deviceStatus struct {

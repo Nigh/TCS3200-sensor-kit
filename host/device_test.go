@@ -58,7 +58,7 @@ func (p *fakePort) Write(b []byte) (int, error) {
 			p.input <- encode(msgACK, f.sequence, []byte{cmdChannels, 0})
 		} else if f.kind == cmdConfig {
 			p.config = append([]byte(nil), f.payload...)
-			p.channels = f.payload[28]
+			p.channels = f.payload[38]
 			p.mode = 0
 			p.input <- encode(msgACK, f.sequence, []byte{cmdConfig, 0})
 		} else if f.kind == cmdMode {

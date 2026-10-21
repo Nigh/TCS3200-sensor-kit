@@ -25,10 +25,10 @@ func testApp(t *testing.T, populated bool) *app {
 		for i := range 12000 {
 			v := sample{channels: 15, sequence: uint32(i), micros: uint64(i * 1000)}
 			for ch := range 4 {
-				v.values[ch] = uint16(20000 + ch*5000 + int(4000*math.Sin(float64(i)*.007*float64(ch+1))))
+				v.values[ch] = uint32(200000 + ch*50000 + int(40000*math.Sin(float64(i)*.007*float64(ch+1))))
 			}
 			if i%997 == 0 {
-				v.values[0] = 40000
+				v.values[0] = 400000
 			}
 			b.history.add(v)
 		}
@@ -146,21 +146,21 @@ func TestThresholdClampsAndPreviewsRate(t *testing.T) {
 	if !u.HasText("当前最大采样率 814 Hz") {
 		t.Fatal("device rate missing")
 	}
-	if err := u.Click("低频阈值，4000 到 600000 Hz"); err != nil {
+	if err := u.Click("低频阈值，100 到 600000 Hz"); err != nil {
 		t.Fatal(err)
 	}
 	u.Key(ui.Ctrl, ui.KeyA)
 	u.Type("1")
-	if !u.HasText("所填最大采样率 240 Hz") {
+	if !u.HasText("所填最大采样率 6 Hz") {
 		t.Fatal("draft rate missing")
 	}
 	if err := u.Click("TCS3200 测量台"); err != nil {
 		t.Fatal(err)
 	}
-	if s.lowInput != "4000" {
+	if s.lowInput != "100" {
 		t.Fatal("blur did not clamp", s.lowInput)
 	}
-	if err := u.Click("低频阈值，4000 到 600000 Hz"); err != nil {
+	if err := u.Click("低频阈值，100 到 600000 Hz"); err != nil {
 		t.Fatal(err)
 	}
 	u.Key(ui.Ctrl, ui.KeyA)
@@ -182,7 +182,7 @@ func TestVariableCadenceChart(t *testing.T) {
 	s.demo = true
 	b.status = deviceStatus{rate: 240, slot: 1040, low: 4000, channels: 15}
 	for i := range 2404 {
-		b.history.add(sample{channels: 15, sequence: uint32(i), micros: uint64(i) * 4160, values: [4]uint16{1000, 2000, 3000, 4000}})
+		b.history.add(sample{channels: 15, sequence: uint32(i), micros: uint64(i) * 4160, values: [4]uint32{(1000) * 10, (2000) * 10, (3000) * 10, (4000) * 10}})
 	}
 	u := ui.NewTester(s.view, 1080, 760)
 	for _, pc := range s.plots {
@@ -205,7 +205,7 @@ func TestIndividualSampleUI(t *testing.T) {
 	s.demo = true
 	b.status = deviceStatus{rate: 1000, slot: 250, low: 20000, channels: 15}
 	for i := range 11 {
-		b.history.add(sample{sequence: uint32(i), micros: 90000 + uint64(i)*1000, channels: 15, values: [4]uint16{10000, 10000, 10000, 10000}})
+		b.history.add(sample{sequence: uint32(i), micros: 90000 + uint64(i)*1000, channels: 15, values: [4]uint32{(10000) * 10, (10000) * 10, (10000) * 10, (10000) * 10}})
 	}
 	s.span = 10000
 	u := ui.NewTester(s.view, 1080, 760)
@@ -240,5 +240,74 @@ func TestIndividualSampleUI(t *testing.T) {
 	u.Move(r.X+r.W/2, r.Y+r.H/2)
 	if !u.HasText("中位数") {
 		t.Fatal("bucket mode not restored", u.Texts())
+	}
+}
+
+func TestWaveformInvertedLogScale(t *testing.T) {
+	s := testApp(t, false)
+	for i, hz := range []uint32{100, 1000, 10000} {
+		s.backend.history.add(sample{sequence: uint32(i), micros: uint64(i+1) * 1000, channels: 15, values: [4]uint32{hz, hz, hz, hz}})
+	}
+	ui.NewTester(s.view, 1080, 760)
+	ys := s.plots[0].ys
+	if len(ys) != 3 || !(ys[0] < ys[1] && ys[1] < ys[2]) || math.Abs(float64((ys[1]-ys[0])-(ys[2]-ys[1]))) > 1e-5 {
+		t.Fatal("expected equal log steps toward stronger light", ys)
+	}
+}
+
+func TestLowLightDashedBoundary(t *testing.T) {
+	s := testApp(t, false)
+	s.backend.status.low = 1000
+	for i := range 101 {
+		v := sample{sequence: uint32(i), micros: uint64(i) * 100000, channels: 15, values: [4]uint32{10000, 10000, 10000, 10000}}
+		if i >= 30 && i <= 70 {
+			v.low = 1
+			v.values[0] = 0
+		}
+		s.backend.history.add(v)
+	}
+	u := ui.NewTester(s.view, 1080, 760)
+	if !u.HasText("红色虚线：光强低于量程下限") {
+		t.Fatal("missing LOW explanation")
+	}
+	r, ok := u.Find("R · 红通道，单位 μs")
+	if !ok {
+		t.Fatal("missing plot")
+	}
+	red := 0
+	img := u.Image()
+	for y := int(r.Y); y < int(r.Y+r.H); y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			rr, gg, bb, _ := img.At(x, y).RGBA()
+			if rr>>8 == 255 && gg>>8 == 92 && bb>>8 == 92 {
+				red++
+			}
+		}
+	}
+	if red == 0 {
+		t.Fatal("LOW boundary was not drawn")
+	}
+	for i := 30; i <= 70; i++ {
+		if !math.IsNaN(float64(s.plots[0].ys[i])) {
+			t.Fatal("LOW rendered as exact value")
+		}
+	}
+	saveScreen(t, "low-light", u)
+}
+
+func TestLowSpansDoNotBridgeGaps(t *testing.T) {
+	data := []sample{
+		{sequence: 1, micros: 100, channels: 1, low: 1},
+		{sequence: 2, micros: 200, channels: 1, low: 1},
+		{sequence: 4, micros: 400, channels: 1, low: 1},
+		{sequence: 5, micros: 500, channels: 1},
+		{sequence: 6, micros: 600, channels: 0, low: 1},
+	}
+	spans := lowSpans(data, 0, 0, 1000)
+	if len(spans) != 2 || spans[0].Lo != 0.1 || spans[0].Hi != 0.2 || spans[1].Lo != 0.4 || spans[1].Hi != 0.5 {
+		t.Fatal(spans)
+	}
+	if len(lowSpans(data, 1, 0, 1000)) != 0 {
+		t.Fatal("disabled channel marked LOW")
 	}
 }
