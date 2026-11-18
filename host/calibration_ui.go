@@ -153,7 +153,7 @@ func (s *app) calibrationView(c *ui.Context, status deviceStatus, ready bool, se
 			}
 		})
 		ui.Column(c).Grow(1).Gap(8).Children(func() {
-			ui.Text(c, "屏幕颜色校准").FontSize(20).Bold()
+			ui.Text(c, "屏幕颜色映射").FontSize(20).Bold()
 			ui.Text(c, "将传感器固定在左侧区域，关闭补光灯。\n保持屏幕亮度、显示设置与环境光不变。").TextColor(s.theme.TextMuted)
 			ui.Text(c, colorText(rgb, 0)).Font("monospace").Width(240).Shrink(0).FontSize(20)
 			if len(s.live) > 0 {
@@ -257,15 +257,20 @@ func (s *app) channelResponse(c *ui.Context, v sample, ch int, color ui.Color) {
 	if !s.calibrationUsable() {
 		return
 	}
-	label := "相对响应 · " + s.readingIssue(v, 1<<ch)
+	issue := s.readingIssue(v, 1<<ch)
+	label, value := "相对响应 · "+issue, "—"
 	fraction := 0.0
-	if s.readingIssue(v, 1<<ch) == "" {
+	if issue == "" {
 		fraction = s.calibration.response(v.values[ch], ch)
-		label = fmt.Sprintf("相对响应 %5.1f%% · %s%3d", fraction*100, [4]string{"R", "G", "B", "C"}[ch], int(math.Round(fraction*255)))
+		label = fmt.Sprintf("相对响应 %.1f%% · %s %d", fraction*100, [4]string{"R", "G", "B", "C"}[ch], int(math.Round(fraction*255)))
+		value = fmt.Sprintf("%.0f%%\n%s %d", fraction*100, [4]string{"R", "G", "B", "C"}[ch], int(math.Round(fraction*255)))
 	}
-	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.Box(c).Width(100).Height(6).Background(s.theme.Border).Children(func() { ui.Box(c).Width(float32(100 * fraction)).Height(6).Background(color) })
-		ui.Text(c, label).Font("monospace").Width(230).Shrink(0).FontSize(12).TextColor(s.theme.TextMuted)
+	ui.Column(c).Width(44).Gap(4).AlignItems(ui.Center).Label(label).Tooltip(label).Children(func() {
+		ui.Text(c, "相对响应").FontSize(10).TextColor(s.theme.TextMuted).SingleLine()
+		ui.Box(c).Width(10).Grow(1).MinHeight(32).Radius(4).Background(s.theme.Border).Label("竖向相对响应").Children(func() {
+			ui.Box(c).Absolute().Bottom(0).Left(0).Width(10).HeightPercent(float32(fraction * 100)).Radius(4).Background(color)
+		})
+		ui.Text(c, value).FontSize(10).TextColor(s.theme.TextMuted)
 	})
 }
 func (s *app) measuredColor(c *ui.Context, serial string) {

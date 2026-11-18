@@ -100,53 +100,6 @@ func bucketStats(data []sample, ch int, lo, hi float64, scratch []float64) (stat
 	return statistics{scratch[0], scratch[n-1], med, n}, scratch
 }
 
-// shortcut: app-side pixel Min/Max uses the existing CPU path; replace with upstream chart.MinMax and StrokePolyline after mygo PR #363 lands.
-func minmax(dstX, dstY, xs, ys []float32, width int) ([]float32, []float32) {
-	dstX, dstY = dstX[:0], dstY[:0]
-	if width <= 0 {
-		return dstX, dstY
-	}
-	emit := func(i int) { dstX = append(dstX, xs[i]); dstY = append(dstY, ys[i]) }
-	for start := 0; start < len(xs); {
-		if math.IsNaN(float64(ys[start])) {
-			emit(start)
-			start++
-			continue
-		}
-		end := start + 1
-		for end < len(xs) && !math.IsNaN(float64(ys[end])) {
-			end++
-		}
-		last := -1
-		add := func(i int) {
-			if i != last {
-				emit(i)
-				last = i
-			}
-		}
-		add(start)
-		for i := start; i < end; {
-			bucket := int(math.Floor(float64(xs[i]) * float64(width)))
-			low, high := i, i
-			i++
-			for i < end && int(math.Floor(float64(xs[i])*float64(width))) == bucket {
-				if ys[i] < ys[low] {
-					low = i
-				}
-				if ys[i] > ys[high] {
-					high = i
-				}
-				i++
-			}
-			add(min(low, high))
-			add(max(low, high))
-		}
-		add(end - 1)
-		start = end
-	}
-	return dstX, dstY
-}
-
 // Recent statistics use only valid measurements of enabled channels.
 func recentStats(data []sample, ch int) (mean, low, high float64, count int) {
 	if len(data) == 0 {

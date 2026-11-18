@@ -12,7 +12,7 @@ colors:
   channel-red: "#ff9db1"
   channel-green: "#8bd5a3"
   channel-blue: "#8bbdf0"
-  channel-clear: "#d3b1f4"
+  channel-clear: "#e1e4ed"
   grid-horizontal: "#343434"
   grid-vertical: "#303030"
 typography:
@@ -83,7 +83,7 @@ The palette pairs charcoal neutrals with a soft pink action accent and four name
 - **Hover Pink** (`primary-hover`): primary control hover state.
 
 ### Secondary
-- **Channel Green**, **Channel Blue**, **Channel Lilac**: green, blue and clear traces and their matching channel labels. Channel Red intentionally shares the pink accent.
+- **Channel Green**, **Channel Blue**, **Channel Clear**: green, blue and near-white clear traces and matching labels. Channel Red shares the pink accent.
 
 ### Neutral
 - **Workspace Charcoal** (`background`): application background.
@@ -107,15 +107,15 @@ The hierarchy favors legible Chinese controls and consistently formatted numeric
 - **Reading:** channel pulse width with one decimal place and μs units.
 - **Body:** controls and channel labels; channel names are bold.
 - **Message:** persistent transport or validation message.
-- **Label:** help, metadata, warning flags and two-line bucket statistics.
+- **Label:** help, metadata, warning flags and hover statistics.
 
 ## Layout
 
-The shipped window opens at 1280 × 900 and has a 1080 × 760 minimum. The outer column uses the workspace inset and section gap tokens. A title/state row precedes the USB/threshold toolbar, with applied and draft maximum sampling rates shown in the heading, then a compact inspection row. A growing, equal-fraction 2 × 2 plot grid fills the remaining space, followed by persistent message and quality rows.
+The window opens at 1280 × 900 with a 1080 × 760 minimum. A flexible main area sits beside a 288 DIP control rail. Acquisition settings and channel switches sit at the top right. Device enumeration, selection, connect/disconnect, state, transport messages and HID status sit at the bottom right. Quality counters remain in the footer.
 
-The plot grid has a native logical minimum height of 400; each chart has a minimum height of 120. Panel contents use the panel inset and group gap. Chart axes use the axis gap. A statistics strip reserves at least 36 logical units beneath each chart so inspection does not cover the waveform or shift its geometry. The device selector is 330 logical units wide and the threshold field is 100.
+Enabled waveforms stack vertically and share the available height equally. Disabled channels occupy no space; all-disabled acquisition shows an explicit empty state. Each row pairs an independent 176 DIP bordered readout card with a growing chart. Colored R/G/B/C badges precede a separate Chinese channel name, pulse width, minimum/maximum and flags. Matching mappings add a vertical response bar inside the readout card. No heading or statistics strip reduces chart height.
 
-This is a desktop native layout with a supported minimum window size; there are no shipped mobile breakpoints or web container rules. Equal panel widths preserve comparable time geometry as the window grows.
+The device selector is 264 DIP wide inside a 12 DIP panel inset. Desktop window resizing expands the charts rather than the control rail. There are no mobile breakpoints.
 
 ## Elevation & Depth
 
@@ -133,23 +133,23 @@ Use MyGo `Button`, `PrimaryButton`, `Select` and `TextInput`. Connection is the 
 
 ### Measurement panel
 
-A surface container holds a channel label, latest pulse width and textual LOW/CLIP/LATE flags above the plot. Each panel retains the same structure. Empty plots show “等待 USB 采样” and the enumeration → selection → connection path. Flags use the framework warning role.
+Each horizontal measurement row pairs a readout column with a growing chart. Empty plots show “等待 USB 采样” and the connection path. Flags use the framework warning role. Clear uses near-white to match the reference layout.
 
 ### Linked inspection
 
-All four panels share the time range and cursor fraction. Pointer-anchored wheel zoom and drag pan freeze the snapshot while acquisition continues. The inspection row exposes pause/resume and return-to-live. Keyboard +/− zoom, left/right pan and Escape return-to-live remain available. Chart areas are focusable and describe their channel, units and interaction.
+All enabled panels share the time range and cursor fraction. Time labels and hover times start at zero on the viewport's left edge; the default ten-second view spans 0–10 s. Pointer-anchored zoom and drag pan freeze the snapshot while acquisition continues. One pause/resume button and Escape restore live display; there is no duplicate return-to-live button. Native 数值波形 / 频谱 tabs share the inspection toolbar and preserve snapshots when switching.
 
-### Statistics strip
+### Hover statistics
 
-Keep bucket bounds, sample count, maximum, minimum and median in the reserved two-line strip. Show an explicit no-data state for empty buckets. Statistics use raw samples; drawing reduction does not redefine the readings.
+Only the hovered chart shows a pass-through native overlay bubble near the pointer or raw sample. `AttachTo` keeps the bubble inside the window. Show bucket bounds, sample count, maximum, minimum and median, or raw sample pulse width and time. LOW explanations appear in the bubble and chart accessibility description. Moving away removes the bubble; inspection never changes chart geometry.
 
 ### Persistent metadata
 
-The footer retains transport/measurement messages, drop and decode counters, protocol errors and threshold. Error state uses the framework danger role. Synthetic demonstration data carries a persistent explicit label identifying it as non-sensor data.
+The bottom-right device panel retains transport/measurement messages and HID polling status. The footer retains drop/decode counters, protocol errors and threshold. Error state uses the framework danger role. Synthetic demonstration data remains explicitly labeled.
 
 Native components have no shipped HTML/CSS snippets. The sidecar deliberately omits browser component previews and mobile breakpoints rather than fabricating an alternate implementation.
 
-When each occupied physical pixel column holds at most one enabled-channel sample, show individual sample pulse width and its time relative to the viewport end, formatted to 0.1 ms, instead of bucket statistics. Draw 3 DIP radius hollow markers with a 1.5 DIP channel-colored outline; fill the marker when the pointer is within 6 DIP of its center. Snap the raw-mode cursor to the nearest actual sample and retain the reserved statistics strip. Dense views keep the existing pixel-bucket summary.
+When each occupied physical pixel column holds at most one enabled-channel sample, show individual pulse width and time relative to the viewport's left edge, formatted to 0.1 ms, in the hover bubble. Draw 3 DIP radius hollow markers with a 1.5 DIP channel-colored outline; fill the marker within 6 DIP of the pointer. Snap the cursor to the nearest actual sample. Dense views show raw-data bucket statistics. MyGo v0.10.0 supplies `chart.MinMax` and `Painter.StrokePolyline`; the app reuses drawing buffers.
 
 ## Do's and Don'ts
 
@@ -157,7 +157,7 @@ When each occupied physical pixel column holds at most one enabled-channel sampl
 - **Do** preserve the confirmed Xianii dark palette and native Chinese interface.
 - **Do** keep the four channel time axes and inspection cursor linked.
 - **Do** retain explicit channel names, units, quality counters and persistent errors.
-- **Do** reserve statistics space below each plot and preserve native focus and disabled states.
+- **Do** let charts fill each row and preserve native focus and disabled states.
 
 ### Don't:
 - **Don't** identify channels by color alone.
@@ -170,8 +170,12 @@ When each occupied physical pixel column holds at most one enabled-channel sampl
 The three workspace tabs use native `TabsBase` semantics with equal flex widths and a 36 DIP tab height. The strip has a surface background, 1 DIP border, 8 DIP radius and 4 DIP inset/gap. The selected tab has an accent fill and accent-text label; the inactive tab uses muted text and a border-color hover fill. Each tab has a 5 DIP radius. Keep native tab roles, keyboard selection and focus indicators.
 
 
-### Screen calibration and calibrated readings
+### Screen color mapping and mapped readings
 
 The third tab preserves the native dark workspace. A 360 DIP unadorned square displays calibration colors; controls, four pulse readings, progress, failure and reset confirmation remain outside it. Disable tab and acquisition changes during a run. Use the existing native buttons and keyboard focus semantics.
 
-With a matching map, reserve a response row below each plot heading. Use an explicit percentage and channel/value label beside a flat channel-colored bar. The existing inspection row displays a 24 DIP color swatch and a keyboard-operable RGB/HEX/HSL format button. At the minimum window size, calibrated panels use a 90 DIP chart minimum and 6 DIP content gap to preserve the existing statistics strip; uncalibrated charts retain the 120 DIP minimum.
+The third tab is named 屏幕颜色映射. With a matching map, show a bottom-up vertical channel-colored response bar in the left readout card, with percentage and channel/value text. The inspection row retains its color swatch and keyboard-operable RGB/HEX/HSL button. Charts use a 48 DIP minimum allocation including axes.
+
+### Spectrum
+
+The frequency mode reuses channel cards and flex heights. Each card shows its actual FFT point count and Δf instead of waveform extrema. Analyze only the latest valid contiguous suffix inside the current viewport, using 32–4096 power-of-two points, timestamp-derived rate, DC removal and a Hann window. Use a linear single-sided amplitude scale in μs and 0–Nyquist frequency ticks in Hz/kHz. Annotate each channel's dominant prominent peak with a pass-through bubble attached to the peak, without hover or reserved vertical space. Flat/noisy signals have no peak label; missing or irregular data shows an explicit waiting/error state. Cache FFT results and reuse transform/drawing buffers.
