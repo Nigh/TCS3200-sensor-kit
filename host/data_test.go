@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/egoist/mygo/ui/chart"
 	"math"
 	"slices"
 	"testing"
@@ -32,7 +33,7 @@ func TestHistory(t *testing.T) {
 func TestMinmaxAndStats(t *testing.T) {
 	xs := []float32{0, .01, .02, .03, .4, .5, .6, 1}
 	ys := []float32{0, 10, -5, 2, 3, float32(math.NaN()), 4, 5}
-	x, y := minmax(nil, nil, xs, ys, 2)
+	x, y := chart.MinMax(nil, nil, xs, ys, 2)
 	if !slices.Contains(y, float32(10)) || !slices.Contains(y, float32(-5)) || x[0] != 0 || x[len(x)-1] != 1 {
 		t.Fatal(x, y)
 	}
@@ -78,11 +79,11 @@ func BenchmarkMinMax(b *testing.B) {
 		ys[i] = float32(math.Sin(float64(i) * .07))
 	}
 	var x, y []float32
-	x, y = minmax(x, y, xs, ys, 1000)
+	x, y = chart.MinMax(x, y, xs, ys, 1000)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		x, y = minmax(x, y, xs, ys, 1000)
+		x, y = chart.MinMax(x, y, xs, ys, 1000)
 	}
 }
 

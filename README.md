@@ -61,7 +61,7 @@ make host-build    # host/build/tcs3200-host
 make host-test     # 上位机测试和 vet
 ```
 
-需要 Go 1.27.1+、GTK 3 与 OpenGL。连接设备后点击“枚举设备”，选择端口并连接。没有硬件时可先运行演示模式。串口权限、图表操作、自动触发与校准步骤见 [上位机说明](host/README.md)。
+需要 Go 1.27.3+、GTK 3 与 OpenGL。连接设备后点击“枚举设备”，选择端口并连接。没有硬件时可先运行演示模式。串口权限、图表操作、自动触发与颜色映射步骤见 [上位机说明](host/README.md)。
 
 ## 采样与触发
 

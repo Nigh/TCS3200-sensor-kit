@@ -147,6 +147,12 @@ func TestCalibrationUIAndColorFormats(t *testing.T) {
 	if !ok || square.W != 360 || square.H != 360 || square.X+square.W > 1080 {
 		t.Fatal(square)
 	}
+	for _, name := range []string{"采样控制", "USB CDC 设备", "枚举设备"} {
+		control, found := u.Find(name)
+		if !found || control.X < 772 || control.X+control.W > 1080 || control.Y+control.H > 760 {
+			t.Fatal("mapping sidebar outside window", name, control)
+		}
+	}
 	for _, text := range []string{"开始校准", "重置校准", "重置全部设置", "125 色"} {
 		if !u.HasText(text) {
 			t.Fatal(text)
@@ -181,6 +187,15 @@ func TestCalibrationUIAndColorFormats(t *testing.T) {
 		t.Fatal(u.Texts())
 	}
 	u.SetSize(1080, 760)
+	u.Frame()
+	bar, ok := u.Find("竖向相对响应")
+	plot, plotOK := u.Find("R · 红通道，单位 μs")
+	if !ok || !plotOK || bar.H <= bar.W || bar.X+bar.W >= plot.X {
+		t.Fatal("response bar must be vertical and left of plot", bar, plot)
+	}
+	if plot.Y+plot.H > 760 {
+		t.Fatal("mapped chart outside minimum window", plot)
+	}
 	saveScreen(t, "calibrated-waveform", u)
 	s.backend.serial = "other"
 	u.Frame()

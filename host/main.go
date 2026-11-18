@@ -17,6 +17,7 @@ import (
 
 type plotCache struct {
 	xs, ys, bx, by []float32
+	points         [][2]float32
 	key            string
 }
 type app struct {
@@ -32,6 +33,8 @@ type app struct {
 
 	backend                           *backend
 	tab                               int
+	plotMode                          int
+	spectra                           [4]spectrum
 	reference                         uint32
 	referenceValid                    bool
 	referenceChannel                  byte
@@ -260,7 +263,6 @@ func (s *app) view(c *ui.Context) {
 	ui.Column(c).Fill().Padding(20).Gap(12).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(16).Children(func() {
 			ui.Text(c, "TCS3200 测量台").FontSize(22).Bold()
-			ui.Text(c, state).TextColor(s.theme.Accent)
 			ui.Box(c).Grow(1)
 			ui.Text(c, func() string {
 				if status.rate == 0 {
@@ -270,45 +272,10 @@ func (s *app) view(c *ui.Context) {
 			}()).TextColor(s.theme.TextMuted).FontSize(12)
 			ui.Textf(c, "所填最大采样率 %d Hz", maskedRateHz(clampedLowInput(s.lowInput, status.low), status.channels)).FontSize(12).TextColor(s.theme.TextMuted)
 		})
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			label := "枚举设备"
-			if enumerating {
-				label = "枚举中…"
-			}
-			if ui.Button(c, label).Disabled(enumerating || s.demo).Clicked() {
-				b.scan()
-			}
-			ui.Select(c, &s.selected, options).Width(330).Label("USB CDC 设备").Disabled(state == "连接中" || state == "已连接" || len(options) == 0)
-			if state == "已连接" || state == "连接中" {
-				if ui.Button(c, "断开").Clicked() {
-					b.disconnect()
-				}
-			} else if ui.PrimaryButton(c, "连接").Disabled(s.selected == "" || s.demo).Clicked() {
-				for _, d := range devices {
-					if d.label == s.selected {
-						b.connect(d.path)
-						break
-					}
-				}
-			}
-			ui.Box(c).Grow(1)
-			ui.Text(c, "低频阈值 / Hz").TextColor(s.theme.TextMuted)
-			input := ui.TextInput(c, &s.lowInput).Width(100).Label("低频阈值，100 到 600000 Hz").Tooltip("离开输入框或应用时自动限制到 100–600000 Hz").Disabled(state != "已连接" || busy || s.calibrationRun != nil || s.restoring)
-			focused := input.Focused()
-			if s.lowFocused && !focused {
-				s.lowInput = strconv.FormatUint(uint64(clampedLowInput(s.lowInput, status.low)), 10)
-			}
-			s.lowFocused = focused
-			if ui.Button(c, "应用").Disabled(state != "已连接" || busy || s.calibrationRun != nil || s.restoring || status.mode != 0 || status.state != 0).Tooltip("范围 100–600000 Hz；应用后已有测试配置失效").Clicked() {
-				v := clampedLowInput(s.lowInput, status.low)
-				s.lowInput = strconv.FormatUint(uint64(v), 10)
-				b.setLow(v)
-			}
-		})
 		previousTab := s.tab
 		tabs := ui.TabsBase(c, &s.tab, 3)
 		tabs.List.Gap(4).Padding(4).Background(s.theme.Surface).Border(1, s.theme.Border).Radius(8).Children(func() {
-			for i, name := range []string{"波形测量", "自动触发测试", "屏幕颜色校准"} {
+			for i, name := range []string{"波形测量", "自动触发测试", "屏幕颜色映射"} {
 				tab := tabs.Tab(i).Disabled(s.calibrationRun != nil).Label(name).Grow(1).Basis(0).MinWidth(0).Height(36).Center().Radius(5)
 				color := s.theme.TextMuted
 				if i == s.tab {
@@ -324,71 +291,146 @@ func (s *app) view(c *ui.Context) {
 		if previousTab != s.tab && s.tab == 1 {
 			s.resume()
 		}
-		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "采集通道")
-			for ch, name := range []string{"R", "G", "B", "Clear"} {
-				enabled := status.channels&(1<<ch) != 0
-				before := enabled
-				ui.Checkbox(c, &enabled, name).Disabled(state != "已连接" || busy || s.calibrationRun != nil || s.restoring || status.mode != 0 || status.state != 0 || s.demo)
-				if enabled != before {
-					b.setChannels(status.channels ^ (1 << ch))
-					s.referenceValid = false
-				}
-			}
-			ui.Text(c, "少开通道可提高采样率；降低低频阈值可扩大动态范围").FontSize(12).TextColor(s.theme.TextMuted)
-		})
-		if s.tab == 2 {
-			s.calibrationView(c, status, state == "已连接" && !busy && !s.restoring, serial)
-		} else if s.tab == 1 {
-			s.testView(c, status, state == "已连接" && !busy && !s.demo)
-		} else {
-
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				label := "暂停刷新"
-				if s.paused {
-					label = "恢复实时"
-				}
-				if ui.Button(c, label).Disabled(len(data) == 0).Clicked() {
-					if s.paused {
-						s.resume()
-					} else {
-						s.freeze()
-					}
-				}
-				if ui.Button(c, "回到实时").Disabled(!s.paused && s.span == float64(windowUS)).Clicked() {
-					s.resume()
-				}
-				mode := "实时"
-				if s.paused {
-					mode = "快照"
-				}
-				ui.Textf(c, "%s · %.3g s", mode, s.span/1e6).TextColor(s.theme.Accent)
-				ui.Box(c).Grow(1)
-				if s.calibrationUsable() {
-					s.measuredColor(c, serial)
+		ui.Row(c).Grow(1).Basis(0).MinHeight(0).Gap(16).AlignItems(ui.Stretch).Children(func() {
+			ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(8).Children(func() {
+				if s.tab == 2 {
+					s.calibrationView(c, status, state == "已连接" && !busy && !s.restoring, serial)
+				} else if s.tab == 1 {
+					s.testView(c, status, state == "已连接" && !busy && !s.demo)
 				} else {
-					ui.Text(c, "滚轮缩放 · 拖动平移 · +/- 缩放 · ←/→ 平移 · Esc 实时").FontSize(12).TextColor(s.theme.TextMuted)
+
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						previousMode := s.plotMode
+						modes := ui.TabsBase(c, &s.plotMode, 2)
+						modes.List.Width(196).Gap(2).Padding(2).Background(s.theme.Surface).Radius(8).Children(func() {
+							for i, name := range []string{"数值波形", "频谱"} {
+								tab := modes.Tab(i).Label(name).Grow(1).Basis(0).Height(30).Center().Radius(6)
+								color := s.theme.TextMuted
+								if i == s.plotMode {
+									tab.Background(s.theme.Accent)
+									color = s.theme.AccentText
+								} else if tab.Hovered() {
+									tab.Background(s.theme.Border)
+								}
+								tab.Children(func() { ui.Text(c, name).FontSize(13).Bold().TextColor(color) })
+							}
+						})
+						if previousMode != s.plotMode {
+							s.hovering, s.drag = false, false
+						}
+						label := "暂停刷新"
+						if s.paused {
+							label = "恢复实时"
+						}
+						if ui.Button(c, label).Disabled(len(data) == 0).Clicked() {
+							if s.paused {
+								s.resume()
+							} else {
+								s.freeze()
+							}
+						}
+						mode := "实时"
+						if s.paused {
+							mode = "快照"
+						}
+						ui.Textf(c, "%s · %.3g s", mode, s.span/1e6).TextColor(s.theme.Accent)
+						ui.Box(c).Grow(1)
+						if s.calibrationUsable() {
+							s.measuredColor(c, serial)
+						} else {
+							help := "左侧 0 s"
+							if s.plotMode == 1 {
+								help = "幅值 μs · 频率 Hz"
+							}
+							ui.Text(c, help).FontSize(12).TextColor(s.theme.TextMuted).Tooltip(fmt.Sprintf("波形滚轮缩放、拖动平移；+/- 缩放，←/→ 平移；Esc 或恢复实时继续采集显示。频谱取当前视口末尾最多 %d 组连续有效采样。", maxFFT))
+						}
+					})
+					ui.Column(c).Grow(1).Basis(0).MinHeight(0).Gap(8).Children(func() {
+						for ch := range 4 {
+							if status.channels&(1<<ch) != 0 || status.channels == 0 && state != "已连接" && !s.demo {
+								s.plot(c.Key(ch), ch)
+							}
+						}
+						if status.channels == 0 && (state == "已连接" || s.demo) {
+							ui.Column(c).Grow(1).Center().Gap(8).Children(func() {
+								ui.Text(c, "所有采集通道已关闭").Bold()
+								ui.Text(c, "在右侧开启通道以查看波形").TextColor(s.theme.TextMuted)
+							})
+						}
+					})
 				}
 			})
-			ui.Grid(c).ColumnTracks(ui.Fr(1), ui.Fr(1)).RowTracks(ui.Fr(1), ui.Fr(1)).Grow(1).MinHeight(400).Gap(12).Children(func() {
-				for ch := range 4 {
-					if status.channels&(1<<ch) != 0 || state != "已连接" {
-						s.plot(c.Key(ch), ch)
-					} else {
-						ui.Text(c, [4]string{"R", "G", "B", "Clear"}[ch]+" · 已关闭")
+			ui.Column(c).Width(288).Gap(12).Children(func() {
+				ui.Column(c).Gap(8).Padding(12).Background(s.theme.Surface).Radius(8).Children(func() {
+					ui.Text(c, "采样控制").Bold()
+					ui.Text(c, "低频阈值 / Hz").TextColor(s.theme.TextMuted)
+					input := ui.TextInput(c, &s.lowInput).Width(100).Label("低频阈值，100 到 600000 Hz").Tooltip("离开输入框或应用时自动限制到 100–600000 Hz").Disabled(state != "已连接" || busy || s.calibrationRun != nil || s.restoring)
+					focused := input.Focused()
+					if s.lowFocused && !focused {
+						s.lowInput = strconv.FormatUint(uint64(clampedLowInput(s.lowInput, status.low)), 10)
 					}
-				}
+					s.lowFocused = focused
+					if ui.Button(c, "应用").Disabled(state != "已连接" || busy || s.calibrationRun != nil || s.restoring || status.mode != 0 || status.state != 0).Tooltip("范围 100–600000 Hz；应用后已有测试配置失效").Clicked() {
+						v := clampedLowInput(s.lowInput, status.low)
+						s.lowInput = strconv.FormatUint(uint64(v), 10)
+						b.setLow(v)
+					}
+				})
+				ui.Column(c).Gap(8).Padding(12).Background(s.theme.Surface).Radius(8).Children(func() {
+					ui.Text(c, "采集通道")
+					ui.Row(c).Gap(8).Children(func() {
+						for ch, name := range []string{"R", "G", "B", "Clear"} {
+							enabled := status.channels&(1<<ch) != 0
+							before := enabled
+							ui.Checkbox(c, &enabled, name).Disabled(state != "已连接" || busy || s.calibrationRun != nil || s.restoring || status.mode != 0 || status.state != 0 || s.demo)
+							if enabled != before {
+								b.setChannels(status.channels ^ (1 << ch))
+								s.referenceValid = false
+							}
+						}
+					})
+					ui.Text(c, "少开通道可提高采样率\n降低低频阈值可扩大动态范围").FontSize(12).TextColor(s.theme.TextMuted)
+				})
+				ui.Box(c).Grow(1)
+				ui.Column(c).Gap(8).Padding(12).Background(s.theme.Surface).Radius(8).Children(func() {
+					ui.Text(c, "测量状态").Bold()
+					ui.Text(c, "TCS3200 · RP2040")
+					ui.Text(c, state).TextColor(s.theme.Accent)
+					label := "枚举设备"
+					if enumerating {
+						label = "枚举中…"
+					}
+					ui.Select(c, &s.selected, options).Width(264).Label("USB CDC 设备").Disabled(state == "连接中" || state == "已连接" || len(options) == 0)
+					ui.Row(c).Gap(8).Children(func() {
+						if ui.Button(c, label).Grow(1).Disabled(enumerating || s.demo).Clicked() {
+							b.scan()
+						}
+						if state == "已连接" || state == "连接中" {
+							if ui.Button(c, "断开").Clicked() {
+								b.disconnect()
+							}
+						} else if ui.PrimaryButton(c, "连接").Disabled(s.selected == "" || s.demo).Clicked() {
+							for _, d := range devices {
+								if d.label == s.selected {
+									b.connect(d.path)
+									break
+								}
+							}
+						}
+					})
+					ui.Text(c, message).FontSize(12).TextColor(func() ui.Color {
+						if state == "异常" {
+							return s.theme.Danger
+						}
+						return s.theme.TextMuted
+					}())
+					ui.Text(c, usb.text()).FontSize(12).TextColor(s.theme.TextMuted)
+				})
 			})
-		}
+		})
 		if s.settingsError != "" {
 			ui.Text(c, s.settingsError).FontSize(12).TextColor(s.theme.Danger)
 		}
-		ui.Text(c, message+" · "+usb.text()).TextColor(func() ui.Color {
-			if state == "异常" {
-				return s.theme.Danger
-			}
-			return s.theme.TextMuted
-		}()).FontSize(13)
 		threshold := "—"
 		if status.low > 0 {
 			threshold = fmt.Sprintf("%.1f μs", 500000/float64(status.low))
@@ -424,7 +466,7 @@ func lowSpans(data []sample, ch int, lo, hi float64) []chart.Span {
 
 func (s *app) plot(c *ui.Context, ch int) {
 	names := [4]string{"R · 红通道", "G · 绿通道", "B · 蓝通道", "Clear · 透明通道"}
-	colors := [4]ui.Color{ui.Hex("#ff9db1"), ui.Hex("#8bd5a3"), ui.Hex("#8bbdf0"), ui.Hex("#d3b1f4")}
+	colors := [4]ui.Color{ui.Hex("#ff9db1"), ui.Hex("#8bd5a3"), ui.Hex("#8bbdf0"), ui.Hex("#e1e4ed")}
 	data := s.data()
 	if s.hovering {
 		s.hover = s.end - s.span + s.hoverFraction*s.span
@@ -435,196 +477,243 @@ func (s *app) plot(c *ui.Context, ch int) {
 	if len(data) > 0 {
 		last = data[len(data)-1]
 	}
-	s.backend.mu.Lock()
-	lowHz := s.backend.status.low
-	s.backend.mu.Unlock()
-	lowPulse := pulseUS(lowHz)
-	lowRanges := lowSpans(data, ch, lo, hi)
 	minY, maxY := math.Inf(1), float64(0)
-	for _, v := range data {
-		if v.channels&(1<<ch) != 0 && v.low&(1<<ch) == 0 && float64(v.micros) >= lo && float64(v.micros) <= hi {
-			if v := pulseUS(v.values[ch]); !math.IsNaN(v) {
-				minY, maxY = min(minY, v), max(maxY, v)
+	lowPulse := math.NaN()
+	var lowRanges []chart.Span
+	if s.plotMode == 1 {
+		s.spectra[ch].update(data, ch, lo, hi, s.epoch)
+	} else {
+		s.backend.mu.Lock()
+		lowHz := s.backend.status.low
+		s.backend.mu.Unlock()
+		lowPulse = pulseUS(lowHz)
+		lowRanges = lowSpans(data, ch, lo, hi)
+		for _, v := range data {
+			if v.channels&(1<<ch) != 0 && v.low&(1<<ch) == 0 && float64(v.micros) >= lo && float64(v.micros) <= hi {
+				if v := pulseUS(v.values[ch]); !math.IsNaN(v) {
+					minY, maxY = min(minY, v), max(maxY, v)
+				}
 			}
 		}
+		if len(lowRanges) > 0 && !math.IsNaN(lowPulse) {
+			minY, maxY = min(minY, lowPulse), max(maxY, lowPulse)
+		}
+		if maxY == 0 {
+			minY, maxY = 0.5, 5000
+		}
 	}
-	if len(lowRanges) > 0 && !math.IsNaN(lowPulse) {
-		minY, maxY = min(minY, lowPulse), max(maxY, lowPulse)
-	}
-	if maxY == 0 {
-		minY, maxY = 0.5, 5000
-	}
-	logMin, logMax := math.Log10(minY), math.Log10(maxY)
-	padding := max(0.1, (logMax-logMin)*0.08)
-	yscale := chart.NewLinear(logMax+padding, logMin-padding)
-	yscale.Format = func(v float64) string { return fmt.Sprintf("%.2g", math.Pow(10, v)) }
-	xticks := chart.NewLinear(-s.span/1e6, 0).Ticks(5)
-	plotGap := float32(8)
-	plotMinimum := float32(120)
-	if s.calibrationUsable() {
-		plotGap = 6
-		plotMinimum = 90
-	}
-	ui.Column(c).Padding(14).Gap(plotGap).Background(s.theme.Surface).Radius(8).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			ui.Text(c, names[ch]).TextColor(colors[ch]).Bold()
-			ui.Box(c).Grow(1)
-			value := "— μs"
-			if len(data) > 0 {
-				value = pulseText(last.values[ch])
-			}
-			ui.Text(c, value).FontSize(20)
-			flags := ""
-			if len(data) > 0 {
-				if last.low&(1<<ch) != 0 {
-					flags += " LOW"
+	ui.Row(c).Gap(8).Grow(1).Basis(0).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+		ui.Row(c).Width(176).Padding(8).Gap(8).Background(s.theme.Surface).Border(1, s.theme.Border).Radius(8).AlignItems(ui.Stretch).Children(func() {
+			ui.Column(c).Grow(1).Basis(0).Gap(2).Children(func() {
+				ui.Box(c).Size(30, 30).Radius(6).Background(colors[ch]).Center().Children(func() {
+					ui.Text(c, [4]string{"R", "G", "B", "C"}[ch]).FontSize(20).Bold().TextColor(s.theme.Background)
+				})
+				ui.Text(c, [4]string{"红通道", "绿通道", "蓝通道", "透明通道"}[ch]).FontSize(12).TextColor(s.theme.TextMuted)
+				value := "— μs"
+				if len(data) > 0 {
+					value = pulseText(last.values[ch])
 				}
-				if last.clip&(1<<ch) != 0 {
-					flags += " CLIP"
+				ui.Text(c, value).FontSize(18)
+				if s.plotMode == 1 && s.spectra[ch].n > 0 {
+					spectrum := &s.spectra[ch]
+					ui.Textf(c, "FFT %d 点\nΔf %.3g Hz", spectrum.n, spectrum.rate/float64(spectrum.n)).FontSize(12).TextColor(s.theme.TextMuted)
+				} else if s.plotMode == 0 && len(data) > 0 {
+					ui.Textf(c, "最小 %.1f μs\n最大 %.1f μs", minY, maxY).FontSize(12).TextColor(s.theme.TextMuted)
 				}
-				if last.flags&1 != 0 {
-					flags += " LATE"
+				flags := ""
+				if len(data) > 0 {
+					if last.low&(1<<ch) != 0 {
+						flags += " LOW"
+					}
+					if last.clip&(1<<ch) != 0 {
+						flags += " CLIP"
+					}
+					if last.flags&1 != 0 {
+						flags += " LATE"
+					}
 				}
-			}
-			ui.Text(c, flags).FontSize(12).TextColor(s.theme.Warning)
+				if flags != "" {
+					ui.Text(c, flags).FontSize(11).TextColor(s.theme.Warning)
+				}
+			})
+			s.channelResponse(c, last, ch, colors[ch])
 		})
-		s.channelResponse(c, last, ch, colors[ch])
-		var statsText = "悬停查看时间桶与样本数\nMax / Min / 中位数 · μs"
-		chart.Plot(c, chart.Axes{Left: yscale.Ticks(4), Bottom: xticks}, func(area ui.Element) {
-			area.Label(names[ch] + "，单位 μs").Description("对数脉宽，上方光线更强；最近十秒；滚轮缩放，拖动平移，方向键浏览").Focusable()
-			area.HandleInput(func(ev ui.InputEvent) bool { return s.input(ev, s.plotWidths[ch], ch) })
-			pointerX, pointerY, over := area.PointerPosition()
-			if !over && s.hoverChannel == ch && s.hovering {
-				s.hovering = false
-				c.Invalidate()
-			}
-
-			// The painter scale sets physical pixel bins; layout-time stats use the last drawn width/scale.
-			raw, nearest := sampleDetail(data, ch, lo, hi, s.plotPixels[ch], s.hover)
-			if raw {
-				statsText = "悬停查看样本值与时间\n时间精度 0.1 ms · μs"
-				if s.hovering && s.hover >= lo && s.hover <= hi {
-					v := data[nearest]
-					statsText = fmt.Sprintf("样本值 %s\n时间 %+.1f ms（相对视口右端）", pulseText(v.values[ch]), (float64(v.micros)-hi)/1000)
-				}
-			}
-			if !raw && s.hovering && s.hover >= lo && s.hover <= hi {
-				pixelWidth := max(1, s.plotPixels[ch])
-				bin := math.Min(float64(pixelWidth-1), math.Floor((s.hover-lo)/s.span*float64(pixelWidth)))
-				a := lo + bin*s.span/float64(pixelWidth)
-				z := lo + (bin+1)*s.span/float64(pixelWidth)
-				if int(bin) == pixelWidth-1 {
-					z = math.Nextafter(z, math.Inf(1))
-				}
-				st, scratch := bucketStats(data, ch, a, z, s.scratch)
-				s.scratch = scratch
-				if st.count == 0 {
-					statsText = "当前时间桶无数据\nMax — · Min — · 中位数 — μs"
-				} else {
-					statsText = fmt.Sprintf("%+.4f…%+.4f s · n=%d\nMax %.1f · Min %.1f · 中位数 %.1f μs", (a-hi)/1e6, (z-hi)/1e6, st.count, st.max, st.min, st.median)
-				}
-			}
-			area.Draw(func(p *ui.Painter, r ui.Rect) {
-				s.plotWidths[ch] = r.W
-				pixels := max(1, int(math.Ceil(float64(r.W*p.Scale()))))
-				s.plotPixels[ch] = pixels
-				drawRaw, nearest := sampleDetail(data, ch, lo, hi, pixels, s.hover)
-				if drawRaw != raw {
+		if s.plotMode == 1 {
+			s.spectrumView(c, ch, names[ch], colors[ch])
+			return
+		}
+		ui.Column(c).Grow(1).Basis(0).MinWidth(0).Padding(10).Background(s.theme.Surface).Radius(8).Children(func() {
+			logMin, logMax := math.Log10(minY), math.Log10(maxY)
+			padding := max(0.1, (logMax-logMin)*0.08)
+			yscale := chart.NewLinear(logMax+padding, logMin-padding)
+			yscale.Format = func(v float64) string { return fmt.Sprintf("%.2g", math.Pow(10, v)) }
+			xscale := chart.NewLinear(0, s.span/1e6)
+			xscale.Format = func(v float64) string { return fmt.Sprintf("%.3g s", v) }
+			xticks := xscale.Ticks(5)
+			statsText := ""
+			chart.Plot(c, chart.Axes{Left: yscale.Ticks(4), Bottom: xticks}, func(area ui.Element) {
+				area.Label(names[ch] + "，单位 μs").Description("对数脉宽，上方光线更强；最近十秒；滚轮缩放，拖动平移，方向键浏览；红色虚线表示 LOW 量程边界，非精确测量值").Focusable()
+				area.HandleInput(func(ev ui.InputEvent) bool { return s.input(ev, s.plotWidths[ch], ch) })
+				pointerX, pointerY, over := area.PointerPosition()
+				if !over && s.hoverChannel == ch && s.hovering {
+					s.hovering = false
 					c.Invalidate()
 				}
-				for _, tick := range yscale.Ticks(4) {
-					y := chart.Y(r, tick.At)
-					p.Line(r.X, y, r.X+r.W, y, 1, ui.Hex("#343434"))
-				}
-				for _, tick := range xticks {
-					x := chart.X(r, tick.At)
-					p.Line(x, r.Y, x, r.Y+r.H, 1, ui.Hex("#303030"))
-				}
-				key := fmt.Sprintf("%d/%d/%d/%f/%f/%f/%f/%d", s.epoch, len(data), last.sequence, lo, hi, minY, maxY, pixels)
-				if pc.key != key {
-					pc.key = key
-					pc.xs, pc.ys = pc.xs[:0], pc.ys[:0]
-					first := true
-					var prev sample
-					for _, v := range data {
-						if float64(v.micros) < lo || float64(v.micros) > hi {
-							continue
-						}
-						x := float32((float64(v.micros) - lo) / s.span)
-						if !first && (v.sequence-prev.sequence != 1 || v.micros <= prev.micros) {
-							pc.xs = append(pc.xs, x)
-							pc.ys = append(pc.ys, float32(math.NaN()))
-						}
-						pc.xs = append(pc.xs, x)
-						y := yscale.At(math.Log10(pulseUS(v.values[ch])))
-						if v.channels&(1<<ch) == 0 || v.low&(1<<ch) != 0 {
-							y = float32(math.NaN())
-						}
-						pc.ys = append(pc.ys, y)
-						prev = v
-						first = false
-					}
-					if !drawRaw {
-						pc.bx, pc.by = minmax(pc.bx, pc.by, pc.xs, pc.ys, pixels)
-					}
-				}
-				p.Clip(r, 0, func() {
-					xs, ys := pc.bx, pc.by
-					if drawRaw {
-						xs, ys = pc.xs, pc.ys
-					}
-					p.StrokePath(chart.Line(r, xs, ys, chart.CurveLinear), 1.5, colors[ch])
-					if !math.IsNaN(lowPulse) {
-						y := chart.Y(r, yscale.At(math.Log10(lowPulse)))
-						for _, span := range lowRanges {
-							x, end := chart.X(r, span.Lo), chart.X(r, span.Hi)
-							// Keep an isolated LOW sample visible at any zoom level.
-							end = min(r.X+r.W, max(end, x+6))
-							x = min(x, end-6)
-							for ; x < end; x += 10 {
-								p.Line(x, y, min(x+6, end), y, 2, ui.Hex("#ff5c5c"))
-							}
-						}
-					}
+
+				// The painter scale sets physical pixel bins; layout-time stats use the last drawn width/scale.
+				raw, nearest := sampleDetail(data, ch, lo, hi, s.plotPixels[ch], s.hover)
+				if raw {
+					statsText = "悬停查看样本值与时间\n时间精度 0.1 ms · μs"
 					if s.hovering && s.hover >= lo && s.hover <= hi {
-						cursor := s.hover
+						v := data[nearest]
+						statsText = fmt.Sprintf("样本值 %s\n时间 %.1f ms（相对窗口左侧）", pulseText(v.values[ch]), (float64(v.micros)-lo)/1000)
+					}
+				}
+				if !raw && s.hovering && s.hover >= lo && s.hover <= hi {
+					pixelWidth := max(1, s.plotPixels[ch])
+					bin := math.Min(float64(pixelWidth-1), math.Floor((s.hover-lo)/s.span*float64(pixelWidth)))
+					a := lo + bin*s.span/float64(pixelWidth)
+					z := lo + (bin+1)*s.span/float64(pixelWidth)
+					if int(bin) == pixelWidth-1 {
+						z = math.Nextafter(z, math.Inf(1))
+					}
+					st, scratch := bucketStats(data, ch, a, z, s.scratch)
+					s.scratch = scratch
+					if st.count == 0 {
+						statsText = "当前时间桶无数据\nMax — · Min — · 中位数 — μs"
+					} else {
+						statsText = fmt.Sprintf("%.4f…%.4f s · n=%d\nMax %.1f · Min %.1f · 中位数 %.1f μs", (a-lo)/1e6, (z-lo)/1e6, st.count, st.max, st.min, st.median)
+					}
+				}
+				if statsText != "" && len(lowRanges) > 0 {
+					statsText += fmt.Sprintf("\n红色虚线：光强低于量程下限\n脉宽 > %.1f μs，非精确测量值", lowPulse)
+				}
+				if over && s.hovering && s.hoverChannel == ch && statsText != "" {
+					x := float32(s.hoverFraction)
+					y := float32(0.5)
+					if raw {
+						v := data[nearest]
+						x = float32((float64(v.micros) - lo) / s.span)
+						value := yscale.At(math.Log10(pulseUS(v.values[ch])))
+						if !math.IsNaN(float64(value)) && !math.IsInf(float64(value), 0) {
+							y = value
+						}
+					} else if r := area.Bounds(); r.H > 0 {
+						y = 1 - pointerY/r.H
+					}
+					anchor := chart.Point(c, x, max(0, min(1, y)), 1, 1).PassThrough()
+					ui.Overlay(c, func() {
+						ui.Column(c).AttachTo(anchor, ui.AnchorTopRight, ui.AnchorBottomLeft).Margin(8).
+							PassThrough().Role(ui.RoleTooltip).Label("波形统计气泡").Padding(8, 12).Gap(4).
+							Background(s.theme.Background).Border(1, s.theme.Border).Radius(8).
+							Children(func() {
+								ui.Text(c, names[ch]).FontSize(12).Bold().TextColor(colors[ch])
+								ui.Text(c, statsText).FontSize(12).TextColor(s.theme.Text)
+							})
+					})
+				}
+				area.Draw(func(p *ui.Painter, r ui.Rect) {
+					s.plotWidths[ch] = r.W
+					pixels := max(1, int(math.Ceil(float64(r.W*p.Scale()))))
+					s.plotPixels[ch] = pixels
+					drawRaw, nearest := sampleDetail(data, ch, lo, hi, pixels, s.hover)
+					if drawRaw != raw {
+						c.Invalidate()
+					}
+					for _, tick := range yscale.Ticks(4) {
+						y := chart.Y(r, tick.At)
+						p.Line(r.X, y, r.X+r.W, y, 1, ui.Hex("#343434"))
+					}
+					for _, tick := range xticks {
+						x := chart.X(r, tick.At)
+						p.Line(x, r.Y, x, r.Y+r.H, 1, ui.Hex("#303030"))
+					}
+					key := fmt.Sprintf("%d/%d/%d/%f/%f/%f/%f/%d", s.epoch, len(data), last.sequence, lo, hi, minY, maxY, pixels)
+					if pc.key != key {
+						pc.key = key
+						pc.xs, pc.ys = pc.xs[:0], pc.ys[:0]
+						first := true
+						var prev sample
+						for _, v := range data {
+							if float64(v.micros) < lo || float64(v.micros) > hi {
+								continue
+							}
+							x := float32((float64(v.micros) - lo) / s.span)
+							if !first && (v.sequence-prev.sequence != 1 || v.micros <= prev.micros) {
+								pc.xs = append(pc.xs, x)
+								pc.ys = append(pc.ys, float32(math.NaN()))
+							}
+							pc.xs = append(pc.xs, x)
+							y := yscale.At(math.Log10(pulseUS(v.values[ch])))
+							if v.channels&(1<<ch) == 0 || v.low&(1<<ch) != 0 {
+								y = float32(math.NaN())
+							}
+							pc.ys = append(pc.ys, y)
+							prev = v
+							first = false
+						}
+						if !drawRaw {
+							pc.bx, pc.by = chart.MinMax(pc.bx, pc.by, pc.xs, pc.ys, pixels)
+						}
+					}
+					p.Clip(r, 0, func() {
+						xs, ys := pc.bx, pc.by
 						if drawRaw {
-							cursor = float64(data[nearest].micros)
+							xs, ys = pc.xs, pc.ys
 						}
-						x := chart.X(r, float32((cursor-lo)/s.span))
-						p.Line(x, r.Y, x, r.Y+r.H, 1, s.theme.TextMuted)
-					}
-					if drawRaw {
-						circles := new(ui.Path)
-						for i, x := range pc.xs {
-							if !math.IsNaN(float64(pc.ys[i])) {
-								circles.Circle(chart.X(r, x), chart.Y(r, pc.ys[i]), 3)
+						pc.points = pc.points[:0]
+						for i, x := range xs {
+							pc.points = append(pc.points, [2]float32{chart.X(r, x), chart.Y(r, ys[i])})
+						}
+						p.StrokePolyline(pc.points, 1.5, colors[ch])
+						if !math.IsNaN(lowPulse) {
+							y := chart.Y(r, yscale.At(math.Log10(lowPulse)))
+							for _, span := range lowRanges {
+								x, end := chart.X(r, span.Lo), chart.X(r, span.Hi)
+								// Keep an isolated LOW sample visible at any zoom level.
+								end = min(r.X+r.W, max(end, x+6))
+								x = min(x, end-6)
+								for ; x < end; x += 10 {
+									p.Line(x, y, min(x+6, end), y, 2, ui.Hex("#ff5c5c"))
+								}
 							}
 						}
-						p.FillPath(circles, s.theme.Surface)
-						p.StrokePath(circles, 1.5, colors[ch])
-						if over && s.hovering && s.hoverChannel == ch {
-							v := data[nearest]
-							x := chart.X(r, float32((float64(v.micros)-lo)/s.span))
-							y := chart.Y(r, yscale.At(math.Log10(pulseUS(v.values[ch]))))
-							if math.Hypot(float64(pointerX-(x-r.X)), float64(pointerY-(y-r.Y))) <= 6 {
-								p.FillPath(new(ui.Path).Circle(x, y, 3), colors[ch])
+						if s.hovering && s.hover >= lo && s.hover <= hi {
+							cursor := s.hover
+							if drawRaw {
+								cursor = float64(data[nearest].micros)
+							}
+							x := chart.X(r, float32((cursor-lo)/s.span))
+							p.Line(x, r.Y, x, r.Y+r.H, 1, s.theme.TextMuted)
+						}
+						if drawRaw {
+							circles := new(ui.Path)
+							for i, x := range pc.xs {
+								if !math.IsNaN(float64(pc.ys[i])) {
+									circles.Circle(chart.X(r, x), chart.Y(r, pc.ys[i]), 3)
+								}
+							}
+							p.FillPath(circles, s.theme.Surface)
+							p.StrokePath(circles, 1.5, colors[ch])
+							if over && s.hovering && s.hoverChannel == ch {
+								v := data[nearest]
+								x := chart.X(r, float32((float64(v.micros)-lo)/s.span))
+								y := chart.Y(r, yscale.At(math.Log10(pulseUS(v.values[ch]))))
+								if math.Hypot(float64(pointerX-(x-r.X)), float64(pointerY-(y-r.Y))) <= 6 {
+									p.FillPath(new(ui.Path).Circle(x, y, 3), colors[ch])
+								}
 							}
 						}
-					}
+					})
 				})
-			})
-			if len(data) == 0 {
-				ui.Column(c).Fill().Center().Children(func() {
-					ui.Text(c, "等待 USB 采样").TextColor(s.theme.TextMuted)
-					ui.Text(c, "枚举设备 → 选择 → 连接").FontSize(12).TextColor(s.theme.TextMuted)
-				})
-			}
-		}).Grow(1).MinHeight(plotMinimum).Gap(6)
-		if len(lowRanges) > 0 && !s.hovering {
-			statsText = fmt.Sprintf("红色虚线：光强低于量程下限\n脉宽 > %.1f μs，非精确测量值", lowPulse)
-		}
-		ui.Text(c, statsText).FontSize(12).TextColor(s.theme.TextMuted).MinHeight(36)
+				if len(data) == 0 {
+					ui.Column(c).Fill().Center().Children(func() {
+						ui.Text(c, "等待 USB 采样").TextColor(s.theme.TextMuted)
+						ui.Text(c, "枚举设备 → 选择 → 连接").FontSize(12).TextColor(s.theme.TextMuted)
+					})
+				}
+			}).Grow(1).MinHeight(48).Gap(6)
+		})
 	})
 }
 

@@ -56,7 +56,7 @@ func saveScreen(t *testing.T, name string, tester *ui.Tester) {
 func TestMeasurementUI(t *testing.T) {
 	s := testApp(t, true)
 	u := ui.NewTester(s.view, 1280, 900)
-	for _, name := range []string{"R · 红通道", "G · 绿通道", "B · 蓝通道", "Clear · 透明通道"} {
+	for _, name := range []string{"红通道", "绿通道", "蓝通道", "透明通道"} {
 		if !u.HasText(name) {
 			t.Fatal(name)
 		}
@@ -65,12 +65,28 @@ func TestMeasurementUI(t *testing.T) {
 		t.Fatal("HID poll status missing")
 	}
 	r, ok := u.Find("R · 红通道，单位 μs")
-	if !ok || r.W < 200 || r.H < 100 {
+	if !ok || r.W < 400 || r.H < 60 {
 		t.Fatal("plot geometry", r)
+	}
+	if _, ok := u.Find("回到实时"); ok {
+		t.Fatal("redundant live button remains")
+	}
+	if !u.HasText("0 s") || !u.HasText("10 s") {
+		t.Fatal("time axis must start at viewport left", u.Texts())
+	}
+	if _, ok := u.Find("波形统计气泡"); ok {
+		t.Fatal("statistics must stay hidden until hover")
 	}
 	u.Move(r.X+r.W/2, r.Y+r.H/2)
 	if !u.HasText("中位数") || !u.HasText("n=") {
 		t.Fatalf("hover statistics: r=%+v hover=%v fraction=%v channel=%v texts=%v", r, s.hovering, s.hoverFraction, s.hoverChannel, u.Texts())
+	}
+	tip, ok := u.Find("波形统计气泡")
+	if !ok || tip.X < 0 || tip.Y < 0 || tip.X+tip.W > 1280 || tip.Y+tip.H > 900 {
+		t.Fatal("hover bubble outside window", tip)
+	}
+	if after, _ := u.Find("R · 红通道，单位 μs"); after != r {
+		t.Fatal("hover changed chart height", r, after)
 	}
 	saveScreen(t, "desktop", u)
 	if err := u.Click("暂停刷新"); err != nil {
@@ -104,8 +120,11 @@ func TestMeasurementUI(t *testing.T) {
 	if s.hovering {
 		t.Fatal("hover did not clear")
 	}
+	if _, ok := u.Find("波形统计气泡"); ok {
+		t.Fatal("bubble did not clear")
+	}
 
-	if err := u.Click("回到实时"); err != nil {
+	if err := u.Click("恢复实时"); err != nil {
 		t.Fatal(err)
 	}
 	if s.paused || s.end != 12000000 {
@@ -117,6 +136,15 @@ func TestMeasurementUI(t *testing.T) {
 		r, ok := u.Find(name)
 		if !ok || r.X < 0 || r.Y < 0 || r.X+r.W > 1080 || r.Y+r.H > 760 {
 			t.Fatal("plot outside window", name, r)
+		}
+		if r.W < 400 || r.H < 40 {
+			t.Fatal("compact plot too small", name, r)
+		}
+		if name != "R · 红通道，单位 μs" {
+			previous, _ := u.Find("R · 红通道，单位 μs")
+			if r.X != previous.X || r.Y <= previous.Y {
+				t.Fatal("channels must stack on a shared time axis", name, r)
+			}
 		}
 	}
 	u.SetScale(2)
@@ -219,7 +247,7 @@ func TestIndividualSampleUI(t *testing.T) {
 	before, _, _, _ := u.Image().At(int(math.Round(float64(x))), int(math.Round(float64(y)))).RGBA()
 	saveScreen(t, "individual-hollow", u)
 	u.Move(x, y)
-	if !u.HasText("样本值 5.0 μs") || !u.HasText("时间 -5.0 ms") || u.HasText("中位数") || u.HasText("Max / Min") {
+	if !u.HasText("样本值 5.0 μs") || !u.HasText("时间 5.0 ms（相对窗口左侧）") || u.HasText("中位数") || u.HasText("Max / Min") {
 		t.Fatal("sample tooltip", u.Texts())
 	}
 	after, _, _, _ := u.Image().At(int(math.Round(float64(x))), int(math.Round(float64(y)))).RGBA()
@@ -237,6 +265,7 @@ func TestIndividualSampleUI(t *testing.T) {
 	}
 	s.span = float64(windowUS)
 	u.Frame()
+	r, _ = u.Find("R · 红通道，单位 μs")
 	u.Move(r.X+r.W/2, r.Y+r.H/2)
 	if !u.HasText("中位数") {
 		t.Fatal("bucket mode not restored", u.Texts())
@@ -267,9 +296,6 @@ func TestLowLightDashedBoundary(t *testing.T) {
 		s.backend.history.add(v)
 	}
 	u := ui.NewTester(s.view, 1080, 760)
-	if !u.HasText("红色虚线：光强低于量程下限") {
-		t.Fatal("missing LOW explanation")
-	}
 	r, ok := u.Find("R · 红通道，单位 μs")
 	if !ok {
 		t.Fatal("missing plot")
@@ -292,6 +318,10 @@ func TestLowLightDashedBoundary(t *testing.T) {
 			t.Fatal("LOW rendered as exact value")
 		}
 	}
+	u.Move(r.X+r.W/2, r.Y+r.H/2)
+	if !u.HasText("红色虚线：光强低于量程下限") {
+		t.Fatal("missing LOW explanation in hover bubble")
+	}
 	saveScreen(t, "low-light", u)
 }
 
@@ -310,4 +340,37 @@ func TestLowSpansDoNotBridgeGaps(t *testing.T) {
 	if len(lowSpans(data, 1, 0, 1000)) != 0 {
 		t.Fatal("disabled channel marked LOW")
 	}
+}
+
+func TestEnabledChannelLayout(t *testing.T) {
+	s := testApp(t, true)
+	u := ui.NewTester(s.view, 1080, 760)
+	full, _ := u.Find("R · 红通道，单位 μs")
+	s.backend.status.channels = 5
+	u.Frame()
+	half, _ := u.Find("R · 红通道，单位 μs")
+	if half.H <= full.H*1.5 {
+		t.Fatal("remaining plots did not expand", full, half)
+	}
+	if _, ok := u.Find("G · 绿通道，单位 μs"); ok {
+		t.Fatal("disabled channel still occupies layout")
+	}
+	s.backend.status.channels = 1
+	u.Frame()
+	single, _ := u.Find("R · 红通道，单位 μs")
+	if single.H <= half.H*1.5 {
+		t.Fatal("single plot did not fill workspace", half, single)
+	}
+	device, _ := u.Find("枚举设备")
+	controls, _ := u.Find("采样控制")
+	if device.X <= single.X+single.W || device.Y <= controls.Y || device.Y < 380 {
+		t.Fatal("device controls must stay at lower right", device, controls)
+	}
+	saveScreen(t, "single-channel", u)
+	s.backend.status.channels = 0
+	u.Frame()
+	if _, ok := u.Find("R · 红通道，单位 μs"); ok || !u.HasText("所有采集通道已关闭") {
+		t.Fatal("all-disabled empty state")
+	}
+	saveScreen(t, "channels-off", u)
 }
