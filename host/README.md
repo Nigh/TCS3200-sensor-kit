@@ -4,7 +4,7 @@ Linux 原生 Go 上位机，基于 MyGo，使用 [USB 协议 v4](../docs/protoco
 
 ![上位机软件界面](../docs/images/screenshot.png)
 
-200 Hz 屏幕、2020 Hz 采样率下的 UFO Test 实拍及对应波形见 [根目录实测展示](../README.md#屏幕采样实拍)。
+200 Hz 屏幕、1633 Hz 采样率下的 UFO Test 实拍、数值波形与 FFT 频谱见 [根目录实测展示](../README.md#屏幕采样实拍)。
 
 ## 运行与构建
 

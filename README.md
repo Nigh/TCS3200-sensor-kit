@@ -15,13 +15,15 @@ TCS3200 Sensor Kit 使用 TCS3200 传感器和 RP2040-Zero 采集屏幕光信号
 
 ### 屏幕采样实拍
 
-![在 200 Hz 屏幕上以 2020 Hz 采样率采集 UFO Test 页面的实拍照片](docs/images/screen200_sample2020_photo.jpg)
+![在 200 Hz 屏幕上以 1633 Hz 采样率采集 UFO Test 页面的实拍照片](docs/images/screen200_sample1633_photo.jpg)
 
-实拍条件：屏幕刷新率 **200 Hz**，采样率 **2020 Hz**，采样页面为 UFO Test。
+实拍条件：屏幕刷新率 **200 Hz**，采样率 **1633 Hz**，采样页面为 UFO Test。
 
-![上述实拍照片中的采样波形截屏](docs/images/screen200_sample2020_chart.png)
+| 数值波形 | 频谱（FFT） |
+| --- | --- |
+| ![实拍采样的数值波形](docs/images/screen200_sample1633_chart.png) | ![实拍采样的 FFT 频谱](docs/images/screen200_sample1633_fft_chart.png) |
 
-这张波形截屏对应上方实拍中的采样。
+数值波形与频谱截图对应上方实拍中的采样。
 
 ## 外壳与 PCB
 

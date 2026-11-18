@@ -13,5 +13,6 @@
 `images/` 保存软件界面和屏幕采样素材，集中展示见 [项目首页](../README.md#软件与实测)。
 
 - [screenshot.png](images/screenshot.png)：软件界面截图。
-- [screen200_sample2020_photo.jpg](images/screen200_sample2020_photo.jpg)：在 200 Hz 刷新率的屏幕上，以 2020 Hz 采样率采集 UFO Test 页面的实拍照片。
-- [screen200_sample2020_chart.png](images/screen200_sample2020_chart.png)：上述实拍照片中的波形截屏。
+- [screen200_sample1633_photo.jpg](images/screen200_sample1633_photo.jpg)：在 200 Hz 刷新率的屏幕上，以 1633 Hz 采样率采集 UFO Test 页面的实拍照片。
+- [screen200_sample1633_chart.png](images/screen200_sample1633_chart.png)：上述实拍采样的数值波形截图。
+- [screen200_sample1633_fft_chart.png](images/screen200_sample1633_fft_chart.png)：上述实拍采样的 FFT 频谱截图，与数值波形在项目首页并列展示。
