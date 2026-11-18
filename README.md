@@ -1,4 +1,5 @@
 # TCS3200 Sensor Kit
+[![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/tcs3200-sensor-kit)
 
 TCS3200 Sensor Kit 使用 TCS3200 传感器和 RP2040-Zero 采集屏幕光信号，在 Linux 上位机中查看 R/G/B/Clear 四通道波形、校准屏幕颜色，并测试颜色变化后的延迟点击。仓库包含固件、上位机、外壳 3D 设计和 PCB 设计。
 
