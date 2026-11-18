@@ -1,6 +1,8 @@
 # 固件
 
-目标：Waveshare RP2040-Zero（RP2040，2 MB Flash），Pico SDK 2.3.0、TinyUSB。核心 1 固定时间槽采集，核心 0 处理 CDC 和键鼠状态机。没有文本日志或 LED 驱动，也不需要给传感器模块的照明 LED 供电。
+固件运行于 Waveshare RP2040-Zero（RP2040，2 MB Flash），使用 Pico SDK 2.3.0 和 TinyUSB。核心 1 按时间槽采集 TCS3200 输出，核心 0 处理 USB CDC 传输和键鼠触发状态机。传感器模块的照明 LED 保持关闭。
+
+硬件设计见 [PCB 工程](../layout/README.md) 和 [外壳设计](../3D/README.md)；采样界面与操作步骤见 [上位机说明](../host/README.md)。
 
 ## 接线
 
@@ -26,7 +28,7 @@
 
 在仓库根目录运行 `make`，或本目录运行 `make`。Docker 镜像固定为 `xianii/pico-sdk:2.3.0`；使用本地 SDK 时设置 `PICO_SDK_PATH` 并运行 `make build`，需要 ARM GCC、CMake 和 Ninja。
 
-生成 `build/src/tcs3200_sensor.uf2`、`.elf`、`.bin`。按住 BOOT 接入 USB，复制 UF2 到引导盘。也可在测量模式通过协议 BOOTSEL 命令进入引导盘，原模板的 `UPLOAD` 文本命令已移除。
+生成 `build/src/tcs3200_sensor.uf2`、`.elf`、`.bin`。按住 BOOT 接入 USB，复制 UF2 到引导盘。也可在测量模式通过协议 BOOTSEL 命令进入引导盘。
 
 `make test` 在主机编译协议和触发逻辑并启用 ASan/UBSan，验证拆包、CRC、异常长度、超时、参数校验、确认/迟滞、取消与释放、计时回绕和频率转换；USB 桩测试验证命令响应、部分写入、背压丢帧、DTR 关闭释放与挂起取消。Python 小型指令模拟执行实际 PIO 源码，验证周期计数、相位、占空比及无边沿预算，并独立校验协议文档的十六进制示例。它不模拟真实 GPIO 电气特性或完整 USB 硬件。
 
@@ -44,7 +46,7 @@
 
 ## 上板验证
 
-本次没有连接实物。刷写后应验证以下硬件行为：
+刷写后按以下步骤检查接线、采样时序与触发行为：
 
 1. CDC 和键鼠均正常枚举，DTR 后得到 CRC 正确的 40 字节采样帧。
 2. 逻辑分析仪确认 S2/S3 为 R→G→B→Clear，分别设置 4/15/20 kHz，确认 1040/307/250 μs 时间槽、4160/1228/1000 μs 组周期；同时观察实际 OUT 频率与 LOW/LATE 比例。

@@ -1,6 +1,10 @@
 # Linux 上位机
 
-MyGo 原生 Go UI，展示 TCS3200 的 R/G/B/Clear 四通道脉宽；使用 [USB 协议 v4](../docs/protocol.md)。不使用浏览器前端。提供波形测量和独立自动触发测试 Tab；不提供 BOOTSEL、导出或超过 10 秒的历史。
+Linux 原生 Go 上位机，基于 MyGo，使用 [USB 协议 v4](../docs/protocol.md) 接收 TCS3200 采样。三个页面分别用于四通道波形测量、自动触发测试和屏幕颜色校准。波形保留最近 10 秒；刷写固件使用 [固件说明](../firmware/README.md) 中的 BOOTSEL 流程。
+
+![上位机软件界面](../docs/images/screenshot.png)
+
+200 Hz 屏幕、2020 Hz 采样率下的 UFO Test 实拍及对应波形见 [根目录实测展示](../README.md#屏幕采样实拍)。
 
 ## 运行与构建
 
@@ -17,7 +21,7 @@ make host-test     # Go 测试与 vet
 
 也可在本目录运行 `go run .`、`go run . --demo`。现有根目录 `make`、`make test` 仍用于固件。
 
-顶部三个 Tab 等宽，采用有边框的整条页签栏，选中项使用粉色填充；保留左右键、Home/End 切换。窗口默认 1280×900，最小 1080×760。使用 Noto Sans CJK SC 和框架字体回退。Wayland 与 X11 由 GTK 选择；若特定驱动下 Wayland 异常，可用 `GDK_BACKEND=x11 ./host/build/tcs3200-host` 在 XWayland 中运行。
+使用左右键、Home/End 切换顶部页签。窗口默认 1280×900，最小 1080×760，使用 Noto Sans CJK SC 和框架字体回退。Wayland 与 X11 由 GTK 选择；若特定驱动下 Wayland 异常，可用 `GDK_BACKEND=x11 ./host/build/tcs3200-host` 在 XWayland 中运行。
 
 ## 设备连接
 
@@ -65,11 +69,11 @@ make host-test     # Go 测试与 vet
 
 判断及延时均在 MCU 上执行，上位机只配置与显示。USB HID 的 1 ms 轮询、背压和操作系统调度仍会影响最终收到点击的时间；需上板实测校准。LOW 无法区分黑屏和传感器断线。
 
-## 临时性能优化与后续迁移
+## 绘图实现与依赖升级
 
 参考 [mygo PR #363](https://github.com/egoist/mygo/pull/363)，当前只在应用侧按**物理像素列**取 Min/Max，按原始时间顺序保留极值、连续段端点与缺口；复用输出缓冲，正常连续波形绘制点数约为每像素两个点。原始采样数据（最高 4000 Hz）仍保留，未做平滑或平均。
 
-依赖固定到上游 `7769928c78b7`（完整版本见 go.mod），没有使用相邻 mygo checkout、replace 或未合并 fork。临时代码在 `data.go`，带 `shortcut:` 注释。目前仍使用 `chart.Line` / `StrokePath` CPU 路径，不能承诺 PR GPU 路径的性能。
+MyGo 依赖固定到上游 `7769928c78b7`（完整版本见 `go.mod`）。应用侧降采样位于 `data.go`，带 `shortcut:` 注释；绘制使用 `chart.Line` / `StrokePath` CPU 路径。
 
 PR 合并并发布后：
 
@@ -78,7 +82,7 @@ PR 合并并发布后：
 3. 删除临时降采样实现及其专用测试；保留原始样本、hover、缺口和生命周期测试。
 4. 重跑 Linux 1×/2× 渲染、交互、CPU/内存与持续运行检查。仅升级依赖不会自动切换到 PR 的 opt-in GPU API。
 
-主题参考 [Nigh/xianii-theme](https://github.com/Nigh/xianii-theme)（MIT）；在 `ui.Theme` 中映射其中性深色、粉色强调与 8 DIP 圆角，没有引入 CSS/Svelte 依赖。
+主题参考 [Nigh/xianii-theme](https://github.com/Nigh/xianii-theme)（MIT）；在 `ui.Theme` 中映射中性深色、粉色强调与 8 DIP 圆角。
 
 ## 验证
 
@@ -91,9 +95,9 @@ go test -run '^$' -bench BenchmarkMinMax -benchmem
 TCS3200_SCREENSHOTS=build/screens go test -run 'TestMeasurementUI|TestEmptyUI'
 ```
 
-测试覆盖协议校验向量、任意拆包/粘包、坏 CRC 和截断恢复、时间与序号回绕、三分钟等量合成采样的有界保留、丢组、Min/Max 尖峰和缺口、统计、CDC 打开失败/取消/拒绝/超时/关闭/重连，动态速率和边界、阈值自动限幅与速率预览，以及原生界面的 hover、暂停、缩放、平移和恢复。截图检查使用框架原生 headless 渲染；另在当前 Linux 桌面启动过实际窗口。
+测试覆盖协议校验向量、任意拆包/粘包、坏 CRC 和截断恢复、时间与序号回绕、三分钟等量合成采样的有界保留、丢组、Min/Max 尖峰和缺口、统计、CDC 打开失败/取消/拒绝/超时/关闭/重连，动态速率和边界、阈值自动限幅与速率预览，以及原生界面的 hover、暂停、缩放、平移和恢复。截图检查使用框架原生 headless 渲染。
 
-这些测试不代替 USB 实机验收。需接入板卡确认：多设备选择、DTR 启流、连续采集、阈值变化、忙状态、实际拔插与恢复、真实 LOW/CLIP/LATE、长时间运行及 1×/2× GPU 表现。合成采样的时间跨度测试不是三分钟硬件稳定性测试。
+实机验收需接入板卡，检查多设备选择、DTR 启流、连续采集、阈值变化、忙状态、拔插恢复、真实 LOW/CLIP/LATE、长时间运行及 1×/2× GPU 表现。合成数据测试覆盖缓冲区保留，不衡量硬件持续运行的稳定性。
 
 ## 屏幕颜色校准与颜色读数
 
