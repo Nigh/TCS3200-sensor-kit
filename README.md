@@ -1,7 +1,7 @@
 # TCS3200 Sensor Kit
 [![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/tcs3200-sensor-kit)
 
-TCS3200 Sensor Kit 使用 TCS3200 传感器和 RP2040-Zero 采集屏幕光信号，在 Linux 上位机中查看 R/G/B/Clear 四通道波形、校准屏幕颜色，并测试颜色变化后的延迟点击。仓库包含固件、上位机、外壳 3D 设计和 PCB 设计。
+TCS3200 Sensor Kit 使用 TCS3200 传感器和 RP2040-Zero 采集屏幕光信号，在 Linux 上位机中查看 R/G/B/Clear 四通道波形、建立传感器读数与屏幕 RGB 值的映射，并测试颜色变化后的延迟点击。仓库包含固件、上位机、外壳 3D 设计和 PCB 设计。
 
 ## 软件与实测
 
@@ -9,7 +9,9 @@ TCS3200 Sensor Kit 使用 TCS3200 传感器和 RP2040-Zero 采集屏幕光信号
 
 ![Linux 上位机软件界面](docs/images/screenshot.png)
 
-上位机提供波形测量、自动触发测试和屏幕颜色校准。波形保留最近 10 秒，支持缩放、暂停快照，以及像素时间桶的 Max/Min/中位数统计。
+上位机提供波形测量、自动触发测试和颜色校准。波形保留最近 10 秒，支持缩放、暂停快照，以及像素时间桶的 Max/Min/中位数统计。
+
+> **特别说明：** 软件中的颜色校准功能仅用于建立传感器读数与屏幕 RGB 值的映射，不能用于校准屏幕本身的颜色。
 
 ### 屏幕采样实拍
 
