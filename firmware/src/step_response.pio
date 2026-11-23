@@ -1,0 +1,29 @@
+.program step_response
+.side_set 1 opt
+
+public rise:
+    pull block
+    mov x, osr
+    pull block
+    mov y, osr
+rise_before:
+    in pins, 1 side 1
+    jmp x-- rise_before
+rise_after:
+    in pins, 1 side 0
+    jmp y-- rise_after
+    jmp park side 1
+
+public fall:
+    pull block
+    mov x, osr
+    pull block
+    mov y, osr
+fall_before:
+    in pins, 1 side 0
+    jmp x-- fall_before
+fall_after:
+    in pins, 1 side 1
+    jmp y-- fall_after
+park:
+    jmp park side 1
